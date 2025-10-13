@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'login_bottom_sheet.dart'; // BottomSheet 위젯 파일
-import 'input_phone.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});

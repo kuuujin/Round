@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'find_id_screen.dart';
+import 'reset_pw_screen.dart';
 
 class LoginBottomSheet extends StatelessWidget {
   const LoginBottomSheet({super.key});
@@ -99,15 +101,42 @@ class LoginBottomSheet extends StatelessWidget {
 
             // 아이디 찾기, 비밀번호 재설정
             Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text('아이디 찾기', style: TextStyle(color: Colors.white.withOpacity(0.6))),
-                const SizedBox(width: 12),
-                Text('|', style: TextStyle(color: Colors.white.withOpacity(0.3))),
-                const SizedBox(width: 12),
-                Text('비밀번호 재설정', style: TextStyle(color: Colors.white.withOpacity(0.6))),
-              ],
-            ),
+  mainAxisAlignment: MainAxisAlignment.center,
+  children: [
+    TextButton(
+      style: TextButton.styleFrom(
+        // 버튼의 기본 패딩을 제거하여 텍스트처럼 보이게 함
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const FindIdScreen()),
+        );
+      },
+      child: Text('아이디 찾기', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+    ),
+    const SizedBox(width: 12),
+    Text('|', style: TextStyle(color: Colors.white.withOpacity(0.3))),
+    const SizedBox(width: 12),
+    TextButton(
+      style: TextButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const ResetPwScreen()),
+        );
+      },
+      child: Text('비밀번호 재설정', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+    ),
+  ],
+),
             const SizedBox(height: 20),
           ],
         ),
