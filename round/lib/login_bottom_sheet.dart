@@ -1,13 +1,110 @@
 import 'package:flutter/material.dart';
+import 'package:dio/dio.dart'; // Import Dio
+import 'package:round/api_client.dart'; // Import ApiClient
 import 'find_id_screen.dart';
 import 'reset_pw_screen.dart';
+import 'home_screen.dart';
 
-class LoginBottomSheet extends StatelessWidget {
+class LoginBottomSheet extends StatefulWidget { // Changed to StatefulWidget
   const LoginBottomSheet({super.key});
+
+  @override
+  State<LoginBottomSheet> createState() => _LoginBottomSheetState();
+}
+
+class _LoginBottomSheetState extends State<LoginBottomSheet> { // New State class
+  // 1. Add Controllers
+  final _idController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  // 2. Add State variables
+  bool _isLoading = false;
+  final Dio dio = ApiClient().dio; // Get Dio instance
+
+  @override
+  void dispose() {
+    _idController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  // 3. Login Logic Implementation
+  Future<void> _handleLogin() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await dio.post(
+        '/login',
+        data: {
+          'user_id': _idController.text,
+          'password': _passwordController.text,
+        },
+      );
+
+      if (response.statusCode == 200 && response.data['success'] == true) {
+        // Login Successful
+        final userData = response.data['user'];
+        final String loggedInUserId = userData['user_id'];
+        print('Login Successful! User: $userData');
+
+        // TODO: Store user data (e.g., using Provider, Riverpod, GetX, or simple global variable)
+        // For example:
+        // Provider.of<AuthService>(context, listen: false).login(userData);
+
+        if (!mounted) return;
+        Navigator.pop(context); // Close the bottom sheet
+
+        Navigator.pushReplacementNamed(context, '/home', arguments: loggedInUserId,); // Example navigation
+
+      } else {
+         // Handle cases where API returns success: false but status 200 (should ideally be 401)
+         _showErrorDialog(response.data['error'] ?? '아이디 또는 비밀번호가 올바르지 않습니다.');
+      }
+
+    } on DioException catch (e) {
+      String errorMessage = "로그인 요청에 실패했습니다.";
+      if (e.response?.statusCode == 401) { // Unauthorized
+        errorMessage = "아이디 또는 비밀번호가 올바르지 않습니다.";
+      } else if (e.response?.data is Map && e.response?.data['error'] != null) {
+        errorMessage = e.response?.data['error'];
+      }
+      _showErrorDialog(errorMessage);
+    } finally {
+      // Ensure loading state is turned off even if widget is disposed during async call
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  // 4. Error Dialog (similar to other screens)
+  void _showErrorDialog(String message) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF333333).withOpacity(0.8),
+        title: const Row(children: [
+          Icon(Icons.error_outline, color: Colors.redAccent),
+          SizedBox(width: 10),
+          Text('로그인 실패', style: TextStyle(color: Colors.white)),
+        ]),
+        content: Text(message, style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('확인', style: TextStyle(color: Color(0xFFB2F142), fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
     return Padding(
+      // Keep keyboard visibility handling
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 20),
@@ -18,25 +115,24 @@ class LoginBottomSheet extends StatelessWidget {
             topRight: Radius.circular(24),
           ),
         ),
+        child: SingleChildScrollView(
         child: Column(
-          mainAxisSize: MainAxisSize.min, // 컨텐츠 크기만큼만 높이를 차지
+          mainAxisSize: MainAxisSize.min, // Important for bottom sheet
           children: [
-            // 손잡이 모양
-            Container(
-              width: 40,
+            // Handle
+            Container(width: 40,
               height: 4,
               decoration: BoxDecoration(
                 color: Colors.grey[600],
                 borderRadius: BorderRadius.circular(2),
-              ),
-            ),
+              ),),
             const SizedBox(height: 30),
-            
-            // 아이디 입력 필드
+
+            // ID Field - Attach Controller
             TextField(
+              controller: _idController, // Attach controller
               style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: '아이디 입력',
+              decoration: InputDecoration(hintText: '아이디 입력',
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.1), // 필드 내부 색상
@@ -56,12 +152,12 @@ class LoginBottomSheet extends StatelessWidget {
             ),
             const SizedBox(height: 16),
 
-            // 비밀번호 입력 필드
+            // Password Field - Attach Controller
             TextField(
-              obscureText: true, // 비밀번호 가리기
+              controller: _passwordController, // Attach controller
+              obscureText: true,
               style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: '비밀번호 입력',
+              decoration: InputDecoration(hintText: '비밀번호 입력',
                 hintStyle: TextStyle(color: Colors.white.withOpacity(0.6)),
                 filled: true,
                 fillColor: Colors.white.withOpacity(0.1),
@@ -76,32 +172,37 @@ class LoginBottomSheet extends StatelessWidget {
                  focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: const BorderSide(color: Color(0xFFB2F142)),
-                ),
-              ),
+                ),),
             ),
             const SizedBox(height: 30),
 
-            // 로그인 버튼
+            // Login Button - Connect Logic and Loading State
             SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: () {},
+                // Disable button when loading, call _handleLogin when pressed
+                onPressed: _isLoading ? null : _handleLogin,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFB2F142), // 버튼 배경색
-                  foregroundColor: Colors.black,
+                   backgroundColor: const Color(0xFFB2F142), // 버튼 배경색
+                   foregroundColor: Colors.black,
+                  // Disable color slightly faded
+                  disabledBackgroundColor: const Color(0xFFB2F142).withOpacity(0.5),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text('로그인', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                // Show indicator when loading, otherwise show text
+                child: _isLoading
+                    ? const CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.black),
+                      )
+                    : const Text('로그인', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ),
             const SizedBox(height: 20),
-
-            // 아이디 찾기, 비밀번호 재설정
-            Row(
-  mainAxisAlignment: MainAxisAlignment.center,
+            // Find ID / Reset PW Row (Keep navigation as is)
+            Row(mainAxisAlignment: MainAxisAlignment.center,
   children: [
     TextButton(
       style: TextButton.styleFrom(
@@ -137,10 +238,11 @@ class LoginBottomSheet extends StatelessWidget {
     ),
   ],
 ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 50),
           ],
         ),
       ),
+    ),
     );
   }
 }

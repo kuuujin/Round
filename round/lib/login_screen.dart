@@ -17,18 +17,19 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF262626),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 40.0),
+        child: SingleChildScrollView(
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Spacer(flex: 3),
+              const SizedBox(height: 50),
               Image.asset(
-                'asset/images/Round.png',
+                'asset/images/noslogun.png',
                 width: 400,
                 height: 300,
               ),
-              const Spacer(flex: 3),
+              const SizedBox(height: 120),
 
               AnimatedOpacity(
                 opacity: _showButtons ? 1.0 : 0.0,
@@ -101,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
               ),
-              const Spacer(flex: 2), // 하단 여백
+              const SizedBox(height: 20), // 하단 여백
             ],
           ),
         ),
