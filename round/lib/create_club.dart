@@ -290,7 +290,7 @@ class _CreateClubScreenState extends State<CreateClubScreen> {
                       elevation: 0,
                     ),
                     child: const Text(
-                      '모임 만들기',
+                      '동호회 만들기',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
