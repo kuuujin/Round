@@ -442,5 +442,182 @@ def login_user():
             db_connection.close()
             app.logger.debug("MySQL connection is closed for login request")
 
+
+
+@app.route("/create-club", methods=["POST"])
+def create_club():
+    db_connection = None
+    cursor = None # cursor도 finally에서 닫아주기 위해 선언
+    try:
+        # 1. 폼 데이터 받기
+        creator_user_id_str = request.form.get('creator_user_id') # 클라이언트에서 보낸 user_id (문자열)
+        sport = request.form.get('sport')
+        region = request.form.get('region')
+        name = request.form.get('name')
+        description = request.form.get('description')
+        max_capacity = request.form.get('max_capacity')
+        club_image = request.files.get('club_image')
+        image_url = None
+
+        # 2. GCS에 이미지 업로드 (이미지가 있는 경우)
+        if club_image:
+            filename = secure_filename(club_image.filename)
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(os.environ.get('GCS_BUCKET'))
+            blob = bucket.blob(filename)
+            
+            image_bytes = club_image.read()
+            blob.upload_from_string(
+                image_bytes,
+                content_type=club_image.content_type
+            )
+            image_url = blob.public_url
+            app.logger.info(f"Club image uploaded to GCS: {image_url}")
+
+        # 3. 데이터베이스 연결
+        db_config = {
+            'host': os.environ.get('DB_HOST'),
+            'user': os.environ.get('DB_USER'),
+            'password': os.environ.get('DB_PASSWORD'),
+            'database': os.environ.get('DB_NAME')
+        }
+        db_connection = mysql.connector.connect(**db_config)
+        cursor = db_connection.cursor()
+
+        # 4. (중요!) 클라이언트가 보낸 user_id(문자열)로 Users 테이블의 고유 id(숫자) 찾기
+        cursor.execute("SELECT id FROM Users WHERE user_id = %s", (creator_user_id_str,))
+        user_record = cursor.fetchone()
+        if not user_record:
+            return jsonify({"success": False, "error": "생성자 정보를 찾을 수 없습니다."}), 404
+        
+        creator_id_int = user_record[0] # Users.id (숫자)
+
+        # 5. 데이터베이스 트랜잭션 시작 (두 테이블에 모두 저장해야 하므로)
+        db_connection.start_transaction()
+
+        # 6. Clubs 테이블에 동호회 정보 삽입
+        sql_club = """INSERT INTO Clubs (name, sport, region, description, max_capacity, club_image_url, creator_id)
+                      VALUES (%s, %s, %s, %s, %s, %s, %s)"""
+        val_club = (name, sport, region, description, max_capacity, image_url, creator_id_int)
+        cursor.execute(sql_club, val_club)
+        
+        # 7. 방금 생성된 동호회의 고유 ID(auto_increment) 가져오기
+        new_club_id = cursor.lastrowid
+
+        # 8. ClubMembers 테이블에 동호회 생성자를 'admin'으로 자동 추가
+        sql_member = """INSERT INTO ClubMembers (user_id, club_id, role)
+                        VALUES (%s, %s, 'admin')"""
+        val_member = (creator_id_int, new_club_id)
+        cursor.execute(sql_member, val_member)
+        
+        # 9. 모든 작업이 성공했으므로 트랜잭션 완료 (DB에 최종 반영)
+        db_connection.commit()
+
+        app.logger.info(f"New club created (ID: {new_club_id}) by user (ID: {creator_id_int}).")
+        return jsonify({"success": True, "message": "동호회가 성공적으로 생성되었습니다!"}), 201
+
+    except mysql.connector.Error as e:
+        if db_connection:
+            db_connection.rollback() # ❗️ 오류 발생 시 모든 DB 작업을 되돌립니다.
+        if e.errno == 1062: # 이름 중복 오류
+            app.logger.error(f"Club creation failed (Duplicate name): {e}")
+            return jsonify({"success": False, "error": "이미 사용 중인 동호회 이름입니다."}), 409
+        else:
+            app.logger.error(f"DB 오류 (create-club): {e}")
+            return jsonify({"success": False, "error": "데이터베이스 오류가 발생했습니다."}), 500
+    except Exception as e:
+        if db_connection:
+            db_connection.rollback() # ❗️ 오류 발생 시 모든 DB 작업을 되돌립니다.
+        app.logger.error(f"알 수 없는 오류 (create-club): {e}", exc_info=True)
+        return jsonify({"success": False, "error": "서버 처리 중 오류가 발생했습니다."}), 500
+    finally:
+        # 연결 및 커서 닫기
+        if cursor:
+            cursor.close()
+        if db_connection and db_connection.is_connected():
+            db_connection.close()
+            app.logger.debug("MySQL connection is closed for create-club request")
+
+@app.route("/api/my-clubs", methods=["GET"])
+def get_my_clubs():
+    db_connection = None
+    try:
+        # 1. 로그인 세션에서 현재 사용자의 user_id를 가져옵니다.
+        if 'user_id' not in session:
+            return jsonify({"success": False, "error": "로그인이 필요합니다."}), 401
+
+        current_user_id_str = session['user_id'] # 로그인 시 저장한 'user_id' (문자열)
+
+        db_config = { 'host': os.environ.get('DB_HOST'), 'user': os.environ.get('DB_USER'), 'password': os.environ.get('DB_PASSWORD'), 'database': os.environ.get('DB_NAME') }
+        db_connection = mysql.connector.connect(**db_config)
+        cursor = db_connection.cursor(dictionary=True) # 👈 결과를 dict 형태로 받습니다.
+
+        # 2. ClubMembers와 Clubs 테이블을 JOIN하여 사용자가 가입한 클럽 정보만 조회
+        # (Users.user_id는 문자열, ClubMembers.user_id는 Users.id를 참조하는 숫자(INT)이므로 변환 필요)
+        sql = """
+            SELECT C.id, C.name
+            FROM Clubs C
+            JOIN ClubMembers CM ON C.id = CM.club_id
+            JOIN Users U ON CM.user_id = U.id
+            WHERE U.user_id = %s
+        """
+        cursor.execute(sql, (current_user_id_str,))
+        clubs = cursor.fetchall() # [{'id': 1, 'name': '익스플로전'}, ...]
+
+        return jsonify({"success": True, "clubs": clubs}), 200
+
+    except mysql.connector.Error as e:
+        app.logger.error(f"DB 오류 (get_my_clubs): {e}")
+        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
+    finally:
+        if db_connection and db_connection.is_connected():
+            cursor.close()
+            db_connection.close()
+
+
+@app.route("/api/recommended-clubs", methods=["GET"])
+def get_recommended_clubs():
+    db_connection = None
+    try:
+        # 1. 클라이언트가 보낸 쿼리 파라미터에서 'category' 값을 가져옵니다.
+        # 예: /api/recommended-clubs?category=볼링
+        category = request.args.get('category')
+
+        db_config = { 'host': os.environ.get('DB_HOST'), 'user': os.environ.get('DB_USER'), 'password': os.environ.get('DB_PASSWORD'), 'database': os.environ.get('DB_NAME') }
+        db_connection = mysql.connector.connect(**db_config)
+        cursor = db_connection.cursor(dictionary=True)
+
+        # 2. SQL 쿼리와 파라미터를 동적으로 구성합니다.
+        sql = """
+            SELECT 
+                id, name, description, sport, region, club_image_url,
+                (SELECT COUNT(*) FROM ClubMembers CM WHERE CM.club_id = C.id) AS member_count
+            FROM Clubs C
+        """
+        params = [] # SQL 파라미터를 담을 리스트
+
+        # 3. category 값이 있으면, WHERE 절을 추가합니다.
+        if category:
+            sql += " WHERE C.sport = %s"
+            params.append(category)
+        
+        # 4. (추후 로직 추가) 카테고리가 없으면 사용자 지역 기반으로 추천
+        
+        sql += " ORDER BY RAND() LIMIT 10" # 랜덤으로 10개
+        
+        # 5. 파라미터와 함께 쿼리 실행
+        cursor.execute(sql, tuple(params))
+        clubs = cursor.fetchall()
+
+        return jsonify({"success": True, "clubs": clubs}), 200
+
+    except mysql.connector.Error as e:
+        app.logger.error(f"DB 오류 (get_recommended_clubs): {e}")
+        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
+    finally:
+        if db_connection and db_connection.is_connected():
+            cursor.close()
+            db_connection.close()
+
 if __name__ == "__main__":
     app.run(debug=True)
