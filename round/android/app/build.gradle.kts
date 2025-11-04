@@ -54,12 +54,9 @@ android {
             // 이 부분은 이미 release 서명 설정이 되어 있을 수 있습니다.
             signingConfig = signingConfigs.getByName("release")
         }
-        // 👇👇👇 디버그 빌드도 release 서명을 사용하도록 설정합니다 👇👇👇
-        getByName("debug") {
-            signingConfig = signingConfigs.getByName("release")
-        }
     }
 }
+
 
 flutter {
     source = "../.."
