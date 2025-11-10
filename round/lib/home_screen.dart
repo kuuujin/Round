@@ -423,11 +423,11 @@ class _HomeScreenState extends State<HomeScreen> {
             
             // --- 5. 드롭다운 세부 스타일 ---
             style: const TextStyle(
-              color: Colors.black, // 👈 선택된 항목의 텍스트 색상 (흰색)
+              color: Colors.white, // 👈 선택된 항목의 텍스트 색상 (흰색)
               fontWeight: FontWeight.w600,
               fontSize: 16,
             ),
-            dropdownColor: _chipSel, // 👈 메뉴가 펼쳐졌을 때의 배경색
+            dropdownColor: _chipUnsel, // 👈 메뉴가 펼쳐졌을 때의 배경색
             iconEnabledColor: Colors.white, // 👈 드롭다운 화살표 아이콘 색상
           ),
         ),
