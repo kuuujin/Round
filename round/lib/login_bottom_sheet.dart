@@ -3,7 +3,6 @@ import 'package:dio/dio.dart'; // Import Dio
 import 'package:round/api_client.dart'; // Import ApiClient
 import 'find_id_screen.dart';
 import 'reset_pw_screen.dart';
-import 'home_screen.dart';
 
 class LoginBottomSheet extends StatefulWidget { // Changed to StatefulWidget
   const LoginBottomSheet({super.key});
@@ -45,11 +44,6 @@ class _LoginBottomSheetState extends State<LoginBottomSheet> { // New State clas
         // Login Successful
         final userData = response.data['user'];
         final String loggedInUserId = userData['user_id'];
-        print('Login Successful! User: $userData');
-
-        // TODO: Store user data (e.g., using Provider, Riverpod, GetX, or simple global variable)
-        // For example:
-        // Provider.of<AuthService>(context, listen: false).login(userData);
 
         if (!mounted) return;
         Navigator.pop(context); // Close the bottom sheet

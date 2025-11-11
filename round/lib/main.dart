@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:round/create_club.dart';
+import 'package:round/api_client.dart';
 import 'splash_screen.dart'; // 스플래시 화면 임포트
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -14,9 +15,9 @@ import 'package:round/club_schedule.dart';
 import 'package:round/club_board.dart';       
 import 'package:round/club_members.dart'; 
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting();
+  await ApiClient.init();
   runApp(const MyApp());
 }
 

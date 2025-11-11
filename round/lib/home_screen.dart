@@ -32,16 +32,16 @@ class RecommendedClub {
   });
 
   factory RecommendedClub.fromJson(Map<String, dynamic> json) {
-    // 서버에서 받은 데이터를 가공하여 'tags' 문자열 생성
-    String tags = "${json['sport']} · ${json['region']} · 멤버 ${json['member_count']}";
-    
-    return RecommendedClub(
-      name: json['name'],
-      description: json['description'],
-      tags: tags,
-      imageUrl: json['club_image_url'],
-    );
-  }
+  // 👇👇👇 'region' 대신 'sido', 'sigungu' 사용
+  String tags = "${json['sport']} · ${json['sido']} ${json['sigungu']} · 멤버 ${json['member_count']}";
+  
+  return RecommendedClub(
+    name: json['name'],
+    description: json['description'],
+    tags: tags,
+    imageUrl: json['club_image_url'],
+  );
+}
 }
 
 class HomeScreen extends StatefulWidget {
@@ -75,10 +75,17 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MyClub> _myClubs = [];
   List<RecommendedClub> _nearbyClubs = [];
   List<Map<String, String>> _dates = [];
+  Map<String, String?> _userLocations = {}; // 예: {'primary_sido': '인천광역시', ...}
+  // 2. 지역 선택 드롭다운에 표시할 옵션 리스트
+  List<Map<String, dynamic>> _locationOptions = [];
+  // 3. 현재 드롭다운에서 선택된 값 (이 값으로 '내 주변 동호회' API를 호출)
+  // key: 'label' (예: '🏠 주 활동지역'), value: {'sido': '인천광역시', 'sigungu': '미추홀구'}
+  Map<String, dynamic>? _currentLocationContext;
   final Dio dio = ApiClient().dio;
 
+
   final List<String> _categories = const [
-    '볼링', '축구', '풋살', '농구', '3x3 농구', '배트민턴',
+    '볼링', '축구', '풋살', '농구', '3x3 농구', '배드민턴',
   ];
   String _selectedCategory = '볼링';
 
@@ -120,27 +127,85 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // 6. 데이터 로딩 함수 (현재는 Mock)
-  Future<void> _fetchData() async {
+ Future<void> _fetchData() async {
+    setState(() => _isLoading = true);
+    try {
+      // 1. (신규) 사용자 위치 정보부터 가져옵니다.
+      final locationResponse = await dio.get('/api/user-locations');
+      _userLocations = Map<String, String?>.from(locationResponse.data['locations']);
+      
+      // 2. (신규) 드롭다운 옵션 및 기본 선택값 설정
+      _locationOptions = [];
+      Map<String, dynamic>? defaultLocation;
+
+      // 주 활동지역 추가
+      if (_userLocations['primary_sido'] != null) {
+        final location = {
+          'sido': _userLocations['primary_sido'],
+          'sigungu': _userLocations['primary_sigungu']
+        };
+        String label = '🏠 주 활동지역 (${_userLocations['primary_sido']} ${_userLocations['primary_sigungu']})';
+        _locationOptions.add({'label': label, 'value': location});
+        defaultLocation = _locationOptions.first; // 기본값
+      }
+      
+      // 부 활동지역 추가 (있을 경우에만)
+      if (_userLocations['secondary_sido'] != null) {
+        final location = {
+          'sido': _userLocations['secondary_sido'],
+          'sigungu': _userLocations['secondary_sigungu']
+        };
+        String label = '💼 부 활동지역 (${_userLocations['secondary_sido']} ${_userLocations['secondary_sigungu']})';
+        _locationOptions.add({'label': label, 'value': location});
+      }
+      
+      setState(() {
+        _currentLocationContext = defaultLocation; // 3. 현재 선택된 지역을 기본값(주 활동지역)으로 설정
+      });
+
+      // 4. (수정) 내 동호회 + 추천 동호회 동시 호출 (수정된 파라미터 사용)
+      if (_currentLocationContext == null) {
+        // 위치 정보가 아예 없는 예외 처리 (회원가입 시 입력을 안 한 경우)
+         setState(() => _isLoading = false);
+         // TODO: 사용자에게 위치 정보를 먼저 등록하라는 메시지 표시
+         return;
+      }
+      
+      await _fetchHomeData(
+        category: _selectedCategory,
+        location: _currentLocationContext!['value'],
+      );
+
+    } on DioException catch (e) {
+      print("Error fetching initial data: $e");
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _fetchHomeData({required String category, required Map<String, dynamic> location}) async {
+    // _fetchData는 초기 로딩용, _isNearbyLoading은 부분 로딩용
     setState(() {
       _isLoading = true;
       _isNearbyLoading = true;
     });
+    
     try {
-      // 두 API를 동시에 호출하여 시간 절약
       final responses = await Future.wait([
         dio.get('/api/my-clubs'),
         dio.get('/api/recommended-clubs',
-        queryParameters: {'category': _selectedCategory},
+          queryParameters: {
+            'category': category,
+            'sido': location['sido'],       // 👈 수정된 API 파라미터
+            'sigungu': location['sigungu'] // 👈 수정된 API 파라미터
+          },
         )
       ]);
-
-      // 1. '내 동호회' 데이터 처리
+      
+      // ... (myClubs, nearbyClubs 파싱 로직은 동일) ...
       final myClubsResponse = responses[0];
       final List<dynamic> myClubsData = myClubsResponse.data['clubs'];
       final List<MyClub> myClubs = myClubsData.map((data) => MyClub.fromJson(data)).toList();
 
-      // 2. '추천 동호회' 데이터 처리
       final nearbyClubsResponse = responses[1];
       final List<dynamic> nearbyClubsData = nearbyClubsResponse.data['clubs'];
       final List<RecommendedClub> nearbyClubs = nearbyClubsData.map((data) => RecommendedClub.fromJson(data)).toList();
@@ -149,23 +214,20 @@ class _HomeScreenState extends State<HomeScreen> {
         _myClubs = myClubs;
         _userIsInClubs = myClubs.isNotEmpty;
         _nearbyClubs = nearbyClubs;
+        
+        if (_userIsInClubs && _selectedClubId == null) { // 👈 _selectedClubId가 비어있을 때만 초기화
+          _selectedClubId = myClubs.first.id;
+        }
+        
         _isLoading = false;
         _isNearbyLoading = false;
-
-        // 3. 내 동호회가 있으면, 첫 번째 동호회를 기본값으로 선택
-        if (_userIsInClubs) {
-          _selectedClubId = myClubs.first.id;
-          // TODO: 첫 번째 동호회의 일정/피드 데이터도 마저 불러옵니다.
-          // _fetchClubData(_selectedClubId!);
-        }
       });
 
     } on DioException catch (e) {
-      // (에러 처리)
-      print("Error fetching home data: $e");
+      print("Error fetching home data lists: $e");
       setState(() {
         _isLoading = false;
-        _isNearbyLoading = false; // 👈 4. 에러 시에도 두 로딩 모두 종료
+        _isNearbyLoading = false;
       });
     }
   }
@@ -180,10 +242,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _isNearbyLoading = true; // 👈 '내 주변 동호회' 섹션만 로딩 시작
       _selectedCategory = category; // 선택된 카테고리 상태 업데이트
     });
+    final location = _currentLocationContext!['value'];
+    
     try {
       final response = await dio.get(
         '/api/recommended-clubs',
-        queryParameters: {'category': category}, // 👈 새 카테고리로 API 호출
+        queryParameters: {
+          'category': category,
+          'sido': location['sido'],
+          'sigungu': location['sigungu']
+        },
       );
       final List<dynamic> nearbyClubsData = response.data['clubs'];
       final List<RecommendedClub> nearbyClubs = nearbyClubsData.map((data) => RecommendedClub.fromJson(data)).toList();
@@ -262,7 +330,38 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 7. 기존 'Round' 텍스트 Padding 및 Positioned 버튼이 제거됨
+                if (!_isLoading && _locationOptions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: DropdownButtonFormField<Map<String, dynamic>>(
+                    value: _currentLocationContext,
+                    items: _locationOptions.map((option) {
+                      return DropdownMenuItem<Map<String, dynamic>>(
+                        value: option,
+                        child: Text(option['label']!),
+                      );
+                    }).toList(),
+                    onChanged: (newValue) {
+                      if (newValue == null) return;
+                      // 5. (신규) 지역 변경 시 동작
+                      setState(() {
+                        _currentLocationContext = newValue; // 현재 컨텍스트 변경
+                      });
+                      // 새 지역 기준으로 추천 동호회 목록 새로고침
+                      _fetchNearbyClubs(_selectedCategory); 
+                    },
+                    // 드롭다운 스타일
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: const Color(0xFF2F2F2F), // 어두운 패널 색
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    ),
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16),
+                    dropdownColor: const Color(0xFF2F2F2F),
+                    iconEnabledColor: Colors.white70,
+                  ),
+                ),
 
                 // 메인 콘텐츠 (로딩, 멤버 UI, 비멤버 UI)
                 _buildMainContent(),

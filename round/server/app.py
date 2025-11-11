@@ -1,5 +1,6 @@
 import os
 import io
+import time
 from werkzeug.utils import secure_filename
 from datetime import timedelta
 from flask import Flask, request, jsonify, session
@@ -19,7 +20,7 @@ app.secret_key = os.environ.get('FLASK_SECRET_KEY')
 s = URLSafeTimedSerializer(app.secret_key)
 app_hash = os.environ.get('APP_HASH', '')
 
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=180)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
 @app.route("/")
 def hello():
@@ -36,6 +37,10 @@ def register_user():
         phone = request.form.get('phone')
         user_id = request.form.get('user_id')
         plain_password = request.form.get('password') # 사용자가 입력한 원본 비밀번호
+        primary_sido = request.form.get('primary_sido')
+        primary_sigungu = request.form.get('primary_sigungu')
+        secondary_sido = request.form.get('secondary_sido')
+        secondary_sigungu = request.form.get('secondary_sigungu')
         profile_image = request.files.get('profile_image')
         image_url = None
 
@@ -67,10 +72,12 @@ def register_user():
         db_connection = mysql.connector.connect(**db_config)
         cursor = db_connection.cursor()
         
-        sql = """INSERT INTO Users (name, birthdate, gender, phone, user_id, password, profile_image_url)
-                 VALUES (%s, %s, %s, %s, %s, %s, %s)"""
+        sql = """INSERT INTO Users (name, birthdate, gender, phone, user_id, password, profile_image_url,
+                                    primary_sido, primary_sigungu, secondary_sido, secondary_sigungu)
+                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         
-        val = (name, birthdate, gender, phone, user_id, hashed_password, image_url)
+        val = (name, birthdate, gender, phone, user_id, hashed_password, image_url,
+               primary_sido, primary_sigungu, secondary_sido, secondary_sigungu)
         
         cursor.execute(sql, val)
         db_connection.commit()
@@ -151,8 +158,9 @@ def send_verification_code():
     if is_success:
         # 3. 생성된 인증번호와 휴대폰 번호를 세션에 저장
         session['auth_code'] = auth_code
+        session['auth_code_expires_at'] = time.time() + 180
         session['phone_number'] = phone_number
-        session.permanent = True # 위에서 설정한 180초 유효 시간을 적용합니다.
+        session.permanent = True
         
         print(f"✅ {phone_number}로 발송된 인증번호 [{auth_code}]가 세션에 저장되었습니다.")
         
@@ -168,20 +176,29 @@ def send_verification_code():
         }), 500
 
 
-# 5. 인증번호를 확인하는 새로운 API 엔드포인트
+
 @app.route("/verify-code", methods=["POST"])
 def verify_code():
-    # 세션에 인증번호가 없으면 (만료되었거나, 요청한 적이 없으면) 에러 처리
-    if 'auth_code' not in session:
-        return jsonify({"success": False, "error": "인증 시간이 만료되었습니다. 다시 요청해주세요."}), 408 # 408: Request Timeout
+    
+    # 1. 세션에 인증 코드나 만료 시간이 없는지 확인
+    if 'auth_code' not in session or 'auth_code_expires_at' not in session:
+        return jsonify({"success": False, "error": "인증 요청 기록이 없습니다. 다시 시도해주세요."}), 408
+
+    # 2. 현재 시간이 저장된 만료 시간을 초과했는지 확인
+    if time.time() > session['auth_code_expires_at']:
+        # 만료되었으면 해당 키만 삭제
+        session.pop('auth_code', None)
+        session.pop('auth_code_expires_at', None)
+        return jsonify({"success": False, "error": "인증 시간이 만료되었습니다. 다시 요청해주세요."}), 408
+    
 
     data = request.get_json()
-    user_code = data.get('code') # 클라이언트가 보낸 인증번호
+    user_code = data.get('code')
     
-    # 세션에 저장된 번호와 사용자가 입력한 번호를 비교
     if user_code == session['auth_code']:
-        # 인증 성공 시, 사용된 세션 정보는 깨끗하게 지워서 재사용을 방지합니다.
-        session.clear()
+        
+        session.pop('auth_code', None)
+        session.pop('auth_code_expires_at', None)
         return jsonify({"success": True, "message": "인증에 성공했습니다."}), 200
     else:
         return jsonify({"success": False, "error": "인증번호가 일치하지 않습니다."}), 400
@@ -219,6 +236,7 @@ def find_id_send_code():
         # 3. 세션에 인증번호 저장
         session['find_id_auth_code'] = auth_code
         session['find_id_phone'] = phone
+        session['find_id_auth_code_expires_at'] = time.time() + 180
         session.permanent = True # 180초 유효
 
         return jsonify({"success": True, "message": "인증번호가 발송되었습니다."}), 200
@@ -236,7 +254,13 @@ def find_id_verify_code():
     db_connection = None
     try:
         # 1. 세션에 인증 정보가 없으면 시간 초과 처리
-        if 'find_id_auth_code' not in session or 'find_id_phone' not in session:
+        if 'find_id_auth_code' not in session or 'find_id_auth_code_expires_at' not in session:
+            return jsonify({"success": False, "error": "인증 요청 기록이 없습니다."}), 408
+
+        if time.time() > session['find_id_auth_code_expires_at']:
+            session.pop('find_id_auth_code', None)
+            session.pop('find_id_auth_code_expires_at', None)
+            session.pop('find_id_phone', None)
             return jsonify({"success": False, "error": "인증 시간이 만료되었습니다."}), 408
 
         data = request.get_json()
@@ -260,7 +284,9 @@ def find_id_verify_code():
             return jsonify({"success": False, "error": "사용자 정보를 찾을 수 없습니다."}), 404
 
         # 4. 세션을 비우고, 찾은 아이디를 반환
-        session.clear()
+        session.pop('find_id_auth_code', None)
+        session.pop('find_id_auth_code_expires_at', None)
+        session.pop('find_id_phone', None)
         return jsonify({"success": True, "user_id": result[0]}), 200
 
     except mysql.connector.Error as e:
@@ -302,6 +328,7 @@ def reset_pw_send_code():
 
         session['reset_pw_auth_code'] = auth_code
         session['reset_pw_user_id'] = user_id # 다음 단계를 위해 user_id도 저장
+        session['reset_pw_auth_code_expires_at'] = time.time() + 180
         session.permanent = True
 
         return jsonify({"success": True, "message": "인증번호가 발송되었습니다."}), 200
@@ -317,7 +344,13 @@ def reset_pw_send_code():
 @app.route("/reset-pw/verify-code", methods=["POST"])
 def reset_pw_verify_code():
     try:
-        if 'reset_pw_auth_code' not in session:
+        if 'reset_pw_auth_code' not in session or 'reset_pw_auth_code_expires_at' not in session:
+            return jsonify({"success": False, "error": "인증 요청 기록이 없습니다."}), 408
+
+        if time.time() > session['reset_pw_auth_code_expires_at']:
+            session.pop('reset_pw_auth_code', None)
+            session.pop('reset_pw_auth_code_expires_at', None)
+            session.pop('reset_pw_user_id', None)
             return jsonify({"success": False, "error": "인증 시간이 만료되었습니다."}), 408
 
         data = request.get_json()
@@ -330,7 +363,9 @@ def reset_pw_verify_code():
         user_id = session['reset_pw_user_id']
         token = s.dumps(user_id, salt='password-reset-salt')
         
-        session.clear()
+        session.pop('reset_pw_auth_code', None)
+        session.pop('reset_pw_auth_code_expires_at', None)
+        session.pop('reset_pw_user_id', None)
         return jsonify({"success": True, "token": token}), 200
 
     except Exception as e:
@@ -411,7 +446,7 @@ def login_user():
             session['user_id'] = user['user_id']
             session['user_role'] = user['role']
             session['logged_in'] = True
-            session.permanent = False # Make session last until browser closes, or set True for longer duration
+            session.permanent = True
             # -----------------------------------------------------
 
             # Prepare user data to send back (excluding password)
@@ -452,7 +487,8 @@ def create_club():
         # 1. 폼 데이터 받기
         creator_user_id_str = request.form.get('creator_user_id') # 클라이언트에서 보낸 user_id (문자열)
         sport = request.form.get('sport')
-        region = request.form.get('region')
+        sido = request.form.get('sido')
+        sigungu = request.form.get('sigungu')
         name = request.form.get('name')
         description = request.form.get('description')
         max_capacity = request.form.get('max_capacity')
@@ -496,9 +532,9 @@ def create_club():
         db_connection.start_transaction()
 
         # 6. Clubs 테이블에 동호회 정보 삽입
-        sql_club = """INSERT INTO Clubs (name, sport, region, description, max_capacity, club_image_url, creator_id)
+        sql_club = """INSERT INTO Clubs (name, sport, sido, sigungu, description, max_capacity, club_image_url, creator_id)
                       VALUES (%s, %s, %s, %s, %s, %s, %s)"""
-        val_club = (name, sport, region, description, max_capacity, image_url, creator_id_int)
+        val_club = (name, sport, sido, sigungu, description, max_capacity, image_url, creator_id_int)
         cursor.execute(sql_club, val_club)
         
         # 7. 방금 생성된 동호회의 고유 ID(auto_increment) 가져오기
@@ -537,6 +573,77 @@ def create_club():
         if db_connection and db_connection.is_connected():
             db_connection.close()
             app.logger.debug("MySQL connection is closed for create-club request")
+
+@app.route("/api/check-login", methods=["GET"])
+def check_login_status():
+    db_connection = None
+    cursor = None  # 👈 1. cursor를 None으로 초기화
+    try:
+        # 1. 세션에 'logged_in' 플래그와 'user_id'가 있는지 확인
+        if session.get('logged_in') and session.get('user_id'):
+            current_user_id_str = session['user_id']
+            
+            db_config = { 'host': os.environ.get('DB_HOST'), 'user': os.environ.get('DB_USER'), 'password': os.environ.get('DB_PASSWORD'), 'database': os.environ.get('DB_NAME') }
+            db_connection = mysql.connector.connect(**db_config)
+            cursor = db_connection.cursor(dictionary=True)
+            
+            cursor.execute("SELECT id, user_id, name, role, profile_image_url FROM Users WHERE user_id = %s", (current_user_id_str,))
+            user = cursor.fetchone()
+
+            if user:
+                # 3. 세션이 유효하면, 사용자 정보를 반환
+                session.permanent = True  # 👈 2. 세션 만료 시간 30일로 갱신
+                return jsonify({"success": True, "user": user}), 200
+            else:
+                session.clear()
+                return jsonify({"success": False, "error": "사용자 정보를 찾을 수 없습니다."}), 404
+        
+        return jsonify({"success": False, "error": "로그인 상태가 아닙니다."}), 401
+
+    except mysql.connector.Error as e:
+        app.logger.error(f"DB 오류 (check-login): {e}")
+        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
+    except Exception as e: # 👈 3. 모든 예외를 잡는 구문 추가
+        app.logger.error(f"알 수 없는 오류 (check-login): {e}", exc_info=True)
+        return jsonify({"success": False, "error": "서버 내부 오류가 발생했습니다."}), 500
+    finally:
+        if cursor: # 👈 1. cursor가 None이 아닐 때만 close() 호출
+            cursor.close()
+        if db_connection and db_connection.is_connected():
+            db_connection.close()
+
+@app.route("/api/user-locations", methods=["GET"])
+def get_user_locations():
+    db_connection = None
+    try:
+        if 'user_id' not in session:
+            return jsonify({"success": False, "error": "로그인이 필요합니다."}), 401
+        
+        current_user_id_str = session['user_id']
+        
+        db_config = { 'host': os.environ.get('DB_HOST'), 'user': os.environ.get('DB_USER'), 'password': os.environ.get('DB_PASSWORD'), 'database': os.environ.get('DB_NAME') }
+        db_connection = mysql.connector.connect(**db_config)
+        cursor = db_connection.cursor(dictionary=True)
+
+        sql = """
+            SELECT primary_sido, primary_sigungu, secondary_sido, secondary_sigungu 
+            FROM Users WHERE user_id = %s
+        """
+        cursor.execute(sql, (current_user_id_str,))
+        locations = cursor.fetchone()
+
+        if not locations:
+            return jsonify({"success": False, "error": "사용자 위치 정보를 찾을 수 없습니다."}), 404
+            
+        return jsonify({"success": True, "locations": locations}), 200
+
+    except mysql.connector.Error as e:
+        app.logger.error(f"DB 오류 (get_user_locations): {e}")
+        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
+    finally:
+        if db_connection and db_connection.is_connected():
+            cursor.close()
+            db_connection.close()
 
 @app.route("/api/my-clubs", methods=["GET"])
 def get_my_clubs():
@@ -579,34 +686,51 @@ def get_my_clubs():
 def get_recommended_clubs():
     db_connection = None
     try:
-        # 1. 클라이언트가 보낸 쿼리 파라미터에서 'category' 값을 가져옵니다.
-        # 예: /api/recommended-clubs?category=볼링
+        # 1. 쿼리 파라미터에서 category, sido, sigungu 값을 가져옵니다.
         category = request.args.get('category')
+        sido = request.args.get('sido')
+        sigungu = request.args.get('sigungu')
 
         db_config = { 'host': os.environ.get('DB_HOST'), 'user': os.environ.get('DB_USER'), 'password': os.environ.get('DB_PASSWORD'), 'database': os.environ.get('DB_NAME') }
         db_connection = mysql.connector.connect(**db_config)
         cursor = db_connection.cursor(dictionary=True)
 
         # 2. SQL 쿼리와 파라미터를 동적으로 구성합니다.
-        sql = """
+        sql_select = """
             SELECT 
-                id, name, description, sport, region, club_image_url,
+                id, name, description, sport, sido, sigungu, club_image_url,
                 (SELECT COUNT(*) FROM ClubMembers CM WHERE CM.club_id = C.id) AS member_count
             FROM Clubs C
         """
-        params = [] # SQL 파라미터를 담을 리스트
+        sql_where_clauses = []
+        params = []
 
-        # 3. category 값이 있으면, WHERE 절을 추가합니다.
+        # 3. category 필터 추가
         if category:
-            sql += " WHERE C.sport = %s"
+            sql_where_clauses.append("C.sport = %s")
             params.append(category)
+
+        # 4. sido, sigungu 필터 추가
+        if sido and sigungu:
+            sql_where_clauses.append("C.sido = %s AND C.sigungu = %s")
+            params.extend([sido, sigungu])
+        elif sido:
+            # 시/군/구 없이 시/도만 있는 경우 (예: 세종특별자치시)
+            sql_where_clauses.append("C.sido = %s")
+            params.append(sido)
+            
+        # 5. WHERE 절 조합
+        if sql_where_clauses:
+            sql_where = " WHERE " + " AND ".join(sql_where_clauses)
+        else:
+            sql_where = ""
+            
+        sql_order = " ORDER BY RAND() LIMIT 10" # 랜덤으로 10개
         
-        # 4. (추후 로직 추가) 카테고리가 없으면 사용자 지역 기반으로 추천
+        # 6. 파라미터와 함께 쿼리 실행
+        final_sql = sql_select + sql_where + sql_order
         
-        sql += " ORDER BY RAND() LIMIT 10" # 랜덤으로 10개
-        
-        # 5. 파라미터와 함께 쿼리 실행
-        cursor.execute(sql, tuple(params))
+        cursor.execute(final_sql, tuple(params))
         clubs = cursor.fetchall()
 
         return jsonify({"success": True, "clubs": clubs}), 200

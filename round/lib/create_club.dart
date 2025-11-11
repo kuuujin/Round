@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
+import 'location_search_screen.dart';
 
 class CreateClubScreen extends StatefulWidget {
   final String userId;
@@ -29,8 +30,10 @@ class _CreateClubScreenState extends State<CreateClubScreen> {
   String? _selectedSport;
   int? _selectedCapacity;
 
-  // 입력 컨트롤러
-  final _regionCtrl = TextEditingController(); // 시/군/구
+  final _locationDisplayController = TextEditingController();
+  String? _selectedSido;
+  String? _selectedSigungu;
+
   final _nameCtrl = TextEditingController();
   final _goalCtrl = TextEditingController();
 
@@ -43,7 +46,7 @@ class _CreateClubScreenState extends State<CreateClubScreen> {
 
   @override
   void dispose() {
-    _regionCtrl.dispose();
+    _locationDisplayController.dispose();
     _nameCtrl.dispose();
     _goalCtrl.dispose();
     super.dispose();
@@ -133,7 +136,8 @@ class _CreateClubScreenState extends State<CreateClubScreen> {
       FormData formData = FormData.fromMap({
         'creator_user_id': widget.userId,
         'sport': _selectedSport,
-        'region': _regionCtrl.text.trim(),
+        'sido': _selectedSido,
+        'sigungu': _selectedSigungu,
         'name': _nameCtrl.text.trim(),
         'description': _goalCtrl.text.trim(),
         'max_capacity': _selectedCapacity,
@@ -239,14 +243,35 @@ class _CreateClubScreenState extends State<CreateClubScreen> {
 
                 // 지역
                 const Text('지역', style: TextStyle(fontWeight: FontWeight.w700, color: Colors.white)),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: _regionCtrl,
-                  decoration: _dec('시/군/구 입력', hint: '예: 인천 미추홀구'),
-                  style: const TextStyle(color: Colors.white),
-                  validator: (v) => (v == null || v.trim().isEmpty) ? '시/군/구를 입력하세요.' : null,
-                  textInputAction: TextInputAction.next,
-                ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _locationDisplayController, // 화면 표시용 컨트롤러
+                readOnly: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: _dec('모임 지역 선택', hint: '시/군/구로 검색'),
+                validator: (v) => (v == null || v.trim().isEmpty) ? '모임 지역을 선택하세요.' : null,
+                onTap: () async {
+                  // 1. 위치 검색 화면으로 이동
+                  final result = await Navigator.push<LocationData>(
+                    context,
+                    MaterialPageRoute(builder: (context) => const LocationSearchScreen()),
+                  );
+
+                  // 2. (수정) 'dong' 없이 'sido'와 'sigungu'만 처리
+                  if (result != null) {
+                    setState(() {
+                      // 3. API 전송을 위해 시/도, 시/군/구 저장
+                      _selectedSido = result.sido;
+                      _selectedSigungu = result.sigungu;
+                      
+                      // 4. 화면 표시용 컨트롤러 텍스트 업데이트
+                      _locationDisplayController.text = result.sigungu.isEmpty
+                          ? result.sido // 예: "세종특별자치시"
+                          : "${result.sido} ${result.sigungu}"; // 예: "인천광역시 부평구"
+                    });
+                  }
+                },
+              ),
                 const SizedBox(height: 16),
 
                 // 동호회 이름

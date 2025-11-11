@@ -6,6 +6,7 @@ import 'package:round/api_client.dart';
 import 'package:dio/dio.dart';
 import 'package:sms_autofill/sms_autofill.dart';
 import 'package:flutter/services.dart';
+import 'package:round/location_search_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -187,6 +188,10 @@ void _showErrorDialogWithAction(String message, VoidCallback onConfirm) {
         'phone': _phoneController.text,
         'user_id': _idController.text,
         'password': _passwordController.text,
+        'primary_sido': _primarySido,
+        'primary_sigungu': _primarySigungu,
+        'secondary_sido': _secondarySido,     // 값이 없으면 null이 전송됨
+        'secondary_sigungu': _secondarySigungu, // 값이 없으면 null이 전송됨
         'profile_image': await MultipartFile.fromFile(
           _profileImage!.path,
           filename: fileName,
@@ -301,13 +306,20 @@ void _showErrorDialogWithAction(String message, VoidCallback onConfirm) {
   final _idController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _primaryLocationController = TextEditingController();
+  final _secondaryLocationController = TextEditingController();
 
   // --- 포커스 노드 ---
   final _birthDateFocus = FocusNode();
   final _genderDigitFocus = FocusNode();
   final _phoneFocus = FocusNode();
 
+
   // --- 타이머 및 이미지 피커 ---
+  String? _primarySido;
+  String? _primarySigungu;
+  String? _secondarySido;
+  String? _secondarySigungu;
   Timer? _timer;
   int _remainingSeconds = 180;
   File? _profileImage;
@@ -326,6 +338,8 @@ void _showErrorDialogWithAction(String message, VoidCallback onConfirm) {
     _idController.addListener(_updateButtonState);
     _passwordController.addListener(_updateButtonState);
     _confirmPasswordController.addListener(_updateButtonState);
+    _primaryLocationController.addListener(_updateButtonState);
+    _secondaryLocationController.addListener(_updateButtonState);
   }
 
 
@@ -340,6 +354,8 @@ void _showErrorDialogWithAction(String message, VoidCallback onConfirm) {
     _idController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _primaryLocationController.dispose();
+    _secondaryLocationController.dispose();
     _birthDateFocus.dispose();
     _genderDigitFocus.dispose();
     _phoneFocus.dispose();
@@ -826,6 +842,55 @@ Widget _buildStep2_UserDetails() {
             ),
           ),
         ],
+      ),
+      const SizedBox(height: 24),
+      const Text('주 활동지역 (거주지)', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 12),
+      TextFormField(
+        controller: _primaryLocationController, // 1. 화면 표시용 컨트롤러
+        readOnly: true,
+        style: const TextStyle(color: Colors.white),
+        decoration: _buildInputDecoration(hint: '동·읍·면으로 검색'),
+        validator: (v) => (v == null || v.isEmpty) ? '주 활동지역을 선택하세요.' : null,
+        onTap: () async {
+          // 2. 탭하면 위치 검색 화면으로 이동
+          final result = await Navigator.push<LocationData>(
+            context,
+            MaterialPageRoute(builder: (context) => const LocationSearchScreen()),
+          );
+          if (result != null) {
+            setState(() {
+              _primarySido = result.sido;
+              _primarySigungu = result.sigungu;
+              _primaryLocationController.text = "${result.sido} ${result.sigungu}";
+            });
+          }
+        },
+      ),
+      const SizedBox(height: 24),
+
+      // --- 👇👇👇 '부 활동지역' 필드 추가 (선택 사항) 👇👇👇 ---
+      const Text('부 활동지역 (직장/학교 등, 선택)', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 12),
+      TextFormField(
+        controller: _secondaryLocationController, // 1. 화면 표시용 컨트롤러
+        readOnly: true,
+        style: const TextStyle(color: Colors.white),
+        decoration: _buildInputDecoration(hint: '동·읍·면으로 검색 (선택)'),
+        // validator: 없음 (선택 사항이므로)
+        onTap: () async {
+          final result = await Navigator.push<LocationData>(
+            context,
+            MaterialPageRoute(builder: (context) => const LocationSearchScreen()),
+          );
+          if (result != null) {
+            setState(() {
+              _secondarySido = result.sido;
+              _secondarySigungu = result.sigungu;
+              _secondaryLocationController.text = "${result.sido} ${result.sigungu}";
+            });
+          }
+        },
       ),
       const SizedBox(height: 24),
       const Text('프로필 사진', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
