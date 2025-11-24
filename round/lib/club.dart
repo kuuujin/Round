@@ -57,7 +57,7 @@ class _ClubScreenState extends State<ClubScreen> {
   }
 
   Widget _tabs(BuildContext context, int selected) {
-    final tabs = ['홈', '일정', '게시판', '클럽원'];
+    final tabs = ['홈', '일정', '게시판', '클럽정보'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Row(
