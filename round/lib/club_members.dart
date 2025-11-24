@@ -1,9 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart';
+import 'package:round/api_client.dart';
+import 'package:round/home_screen.dart';
+import 'package:round/models/club_models.dart';
 
 class ClubMembersScreen extends StatefulWidget {
+  final int clubId; // 👈 clubId 받기
   final String userId;
-  const ClubMembersScreen({super.key, required this.userId});
+  
+  const ClubMembersScreen({
+    super.key, 
+    required this.clubId, 
+    required this.userId
+  });
 
   @override
   State<ClubMembersScreen> createState() => _ClubMembersScreenState();
@@ -18,244 +28,33 @@ class _ClubMembersScreenState extends State<ClubMembersScreen> {
   static const Color _iconActive = Colors.white;
   static const Color _iconInactive = Color(0xFF9CA3AF);
 
-  // 가입된 동호회 목록 (홈/게시판이랑 동일)
-  final List<String> _joinedClubs = const [
-    '볼링스테이션',
-    '축구스테이션',
-    '풋살스테이션',
-    '농구스테이션',
-    '33스테이션',
-    '배민스테이션',
-    '부평농구',
-  ];
-
-  late String _selectedClub;
-
-  // 클럽별 정보 (배너 + 스탯)
-  late final Map<String, _ClubInfo> _clubInfos = {
-    '볼링스테이션': _ClubInfo(
-      name: '볼링스테이션',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1600132806370-bf3a4b9ba9c1?auto=format&fit=crop&w=1200&q=80',
-      point: 4682500,
-      totalMatches: 165,
-      wins: 96,
-      losses: 69,
-      rankText: 'Rank #2',
-      area: '인천 미추홀구',
-      members: 18,
-    ),
-    '축구스테이션': _ClubInfo(
-      name: '축구스테이션',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1508609349937-5ec4ae374ebf?auto=format&fit=crop&w=1200&q=80',
-      point: 3124000,
-      totalMatches: 120,
-      wins: 70,
-      losses: 50,
-      rankText: 'Rank #5',
-      area: '서울 성동구',
-      members: 24,
-    ),
-    '풋살스테이션': _ClubInfo(
-      name: '풋살스테이션',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1541592106381-b31e9677c0e5?auto=format&fit=crop&w=1200&q=80',
-      point: 1980000,
-      totalMatches: 82,
-      wins: 48,
-      losses: 34,
-      rankText: 'Rank #8',
-      area: '경기 안산시',
-      members: 15,
-    ),
-    '농구스테이션': _ClubInfo(
-      name: '농구스테이션',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1518306727298-4c17a1a76e33?auto=format&fit=crop&w=1200&q=80',
-      point: 2540000,
-      totalMatches: 97,
-      wins: 58,
-      losses: 39,
-      rankText: 'Rank #3',
-      area: '인천 연수구',
-      members: 21,
-    ),
-    '33스테이션': _ClubInfo(
-      name: '33스테이션',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1531415074968-036ba1b575da?auto=format&fit=crop&w=1200&q=80',
-      point: 1420000,
-      totalMatches: 64,
-      wins: 35,
-      losses: 29,
-      rankText: 'Rank #11',
-      area: '서울 마포구',
-      members: 12,
-    ),
-    '배민스테이션': _ClubInfo(
-      name: '배민스테이션',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1528291151371-582c2a5e0df6?auto=format&fit=crop&w=1200&q=80',
-      point: 980000,
-      totalMatches: 40,
-      wins: 22,
-      losses: 18,
-      rankText: 'Rank #14',
-      area: '경기 수원시',
-      members: 10,
-    ),
-    '부평농구': _ClubInfo(
-      name: '부평농구',
-      bannerUrl:
-          'https://images.unsplash.com/photo-1517164850302-7711a7a65b16?auto=format&fit=crop&w=1200&q=80',
-      point: 1760000,
-      totalMatches: 71,
-      wins: 41,
-      losses: 30,
-      rankText: 'Rank #6',
-      area: '인천 부평구',
-      members: 17,
-    ),
-  };
+  bool _isLoading = true;
+  ClubInfo? _currentClubInfo;
+  final Dio dio = ApiClient().dio;
 
   @override
   void initState() {
     super.initState();
-    _selectedClub = _joinedClubs.first;
+    // 1. 전달받은 clubId로 정보 조회
+    _fetchClubInfo(widget.clubId);
   }
 
-  // ===== 상단 탭 이동 =====
-  void _goTab(BuildContext context, int i) {
-    if (i == 3) return; // 현재: 클럽정보
-    final uid = widget.userId;
-    switch (i) {
-      case 0:
-        Navigator.pushReplacementNamed(context, '/club', arguments: uid);
-        break;
-      case 1:
-        Navigator.pushReplacementNamed(context, '/clubSchedule', arguments: uid);
-        break;
-      case 2:
-        Navigator.pushReplacementNamed(context, '/clubBoard', arguments: uid);
-        break;
+  Future<void> _fetchClubInfo(int clubId) async {
+    try {
+      final response = await dio.get('/api/club-info', queryParameters: {'club_id': clubId});
+      final clubData = response.data['club'];
+      setState(() {
+        _currentClubInfo = ClubInfo.fromJson(clubData);
+        _isLoading = false;
+      });
+    } on DioException catch (e) {
+      print("Error fetching club info: $e");
+      setState(() => _isLoading = false);
     }
-  }
-
-  Widget _tabs(BuildContext context) {
-    final tabs = ['홈', '일정', '게시판', '클럽정보'];
-    const selected = 3;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: List.generate(tabs.length, (i) {
-          final sel = i == selected;
-          return Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => _goTab(context, i),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tabs[i],
-                      style: TextStyle(
-                        color: sel ? Colors.white : Colors.white70,
-                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      height: 2,
-                      width: sel ? 32 : 0,
-                      decoration: BoxDecoration(
-                        color: sel ? Colors.white : Colors.transparent,
-                        borderRadius: BorderRadius.circular(1),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  // ===== 하단 네비 =====
-  void _onTapBottom(int i) {
-    final uid = widget.userId;
-    switch (i) {
-      case 0:
-        Navigator.pushReplacementNamed(context, '/home', arguments: uid);
-        break;
-      case 1:
-        Navigator.pushReplacementNamed(context, '/club', arguments: uid);
-        break;
-      case 2:
-        Navigator.pushReplacementNamed(context, '/community', arguments: uid);
-        break;
-      case 3:
-        Navigator.pushReplacementNamed(context, '/mypage', arguments: uid);
-        break;
-    }
-  }
-
-  // ===== 드롭다운 (홈/게시판과 동일 스타일) =====
-  Widget _clubSelector() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: DropdownButtonFormField<String>(
-        value: _selectedClub,
-        items: _joinedClubs.map((name) {
-          return DropdownMenuItem<String>(
-            value: name,
-            child: Text(name),
-          );
-        }).toList(),
-        onChanged: (value) {
-          if (value == null) return;
-          setState(() {
-            _selectedClub = value;
-          });
-        },
-        decoration: InputDecoration(
-          filled: true,
-          fillColor: _chipBlue,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: BorderSide.none,
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        ),
-        style: const TextStyle(
-          color: Colors.white,
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
-        ),
-        dropdownColor: const Color(0xFF1F2937),
-        iconEnabledColor: Colors.white,
-      ),
-    );
   }
 
   // ===== 클럽명 (라임 컬러) =====
-  Widget _clubTitle(_ClubInfo info) {
+  Widget _clubTitle(ClubInfo info) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
       child: Text(
@@ -270,7 +69,7 @@ class _ClubMembersScreenState extends State<ClubMembersScreen> {
   }
 
   // ===== 배너 이미지 =====
-  Widget _clubBanner(_ClubInfo info) {
+  Widget _clubBanner(ClubInfo info) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: ClipRRect(
@@ -297,7 +96,7 @@ class _ClubMembersScreenState extends State<ClubMembersScreen> {
   }
 
   // ===== 정보 카드 =====
-  Widget _infoPanel(_ClubInfo info) {
+  Widget _infoPanel(ClubInfo info) {
     final winRate =
         info.totalMatches == 0 ? 0 : (info.wins / info.totalMatches * 100).round();
 
@@ -315,16 +114,31 @@ class _ClubMembersScreenState extends State<ClubMembersScreen> {
             // 상단: 로고 + 이름
             Row(
               children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: const Color(0xFF111827),
-                  child: Text(
-                    info.name.characters.first,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
+                Container(
+                  width: 40, // 지름 (radius * 2)
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF111827), // 배경색
+                    shape: BoxShape.circle, // 원형 모양
+                    image: (info.bannerUrl.isNotEmpty && !info.bannerUrl.contains('placeholder'))
+                        ? DecorationImage(
+                            image: NetworkImage(info.bannerUrl), // 1. 네트워크 이미지 로드
+                            fit: BoxFit.cover, // 이미지를 원에 꽉 채움
+                          )
+                        : null, // 이미지가 없으면 null (배경색만 보임)
                   ),
+                  // 이미지가 없을 때만 글자 표시
+                  child: (info.bannerUrl.isEmpty || info.bannerUrl.contains('via.placeholder.com'))
+                      ? Center(
+                          child: Text(
+                            info.name.characters.first,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        )
+                      : null,
                 ),
                 const SizedBox(width: 10),
                 Text(
@@ -434,66 +248,35 @@ class _ClubMembersScreenState extends State<ClubMembersScreen> {
     );
   }
 
-  // ===== build =====
   @override
   Widget build(BuildContext context) {
-    final info = _clubInfos[_selectedClub]!;
-
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light.copyWith(
-        statusBarColor: _bg,
-        systemNavigationBarColor: _bg,
-      ),
-      child: Scaffold(
+    if (_isLoading) {
+      return const Scaffold(
         backgroundColor: _bg,
-        body: SafeArea(
-          bottom: false,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 8),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    'Round',
-                    style: TextStyle(
-                      color: _lime,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _tabs(context),
-                _clubSelector(),
-                _clubTitle(info),
-                _clubBanner(info),
-                _infoPanel(info),
-                const SizedBox(height: 80),
-              ],
-            ),
-          ),
-        ),
-        bottomNavigationBar: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: _bg,
-          elevation: 0,
-          currentIndex: 1,
-          selectedItemColor: _iconActive,
-          unselectedItemColor: _iconInactive,
-          showSelectedLabels: false,
-          showUnselectedLabels: false,
-          onTap: _onTapBottom,
-          items: const [
-            BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined), label: 'Home'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.shield_outlined), label: 'Club'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.groups_2_outlined), label: 'Community'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.person_outline), label: 'My'),
+        body: Center(child: CircularProgressIndicator(color: _lime)),
+      );
+    }
+    if (_currentClubInfo == null) {
+      return const Scaffold(
+        backgroundColor: _bg,
+        body: Center(child: Text("정보를 불러올 수 없습니다.", style: TextStyle(color: Colors.white))),
+      );
+    }
+
+    final info = _currentClubInfo!;
+
+    return Scaffold(
+      backgroundColor: _bg,
+      body: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 드롭다운 제거됨
+            const SizedBox(height: 20),
+            _clubTitle(info),
+            _clubBanner(info),
+            _infoPanel(info),
+            const SizedBox(height: 80),
           ],
         ),
       ),
@@ -501,32 +284,6 @@ class _ClubMembersScreenState extends State<ClubMembersScreen> {
   }
 }
 
-// ===== 클럽 정보 모델 =====
-class _ClubInfo {
-  final String name;
-  final String bannerUrl;
-  final int point;
-  final int totalMatches;
-  final int wins;
-  final int losses;
-  final String rankText;
-  final String area;
-  final int members;
-
-  const _ClubInfo({
-    required this.name,
-    required this.bannerUrl,
-    required this.point,
-    required this.totalMatches,
-    required this.wins,
-    required this.losses,
-    required this.rankText,
-    required this.area,
-    required this.members,
-  });
-}
-
-// 숫자 포인트를 4,682,500 이런 식으로 표시
 String _formatNumber(int n) {
   final s = n.toString();
   final buffer = StringBuffer();
@@ -538,4 +295,4 @@ String _formatNumber(int n) {
     }
   }
   return buffer.toString();
-}
+  }

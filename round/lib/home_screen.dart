@@ -1,48 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:round/club_main.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
+import 'package:round/models/club_models.dart';
 
-class MyClub {
-  final int id;
-  final String name;
 
-  MyClub({required this.id, required this.name});
-
-  factory MyClub.fromJson(Map<String, dynamic> json) {
-    return MyClub(
-      id: json['id'],
-      name: json['name'],
-    );
-  }
-}
-
-// 2. '추천 동호회' 모델
-class RecommendedClub {
-  final String name;
-  final String description;
-  final String tags; // "볼링 · 미추홀구 · 멤버 23"
-  final String? imageUrl;
-
-  RecommendedClub({
-    required this.name,
-    required this.description,
-    required this.tags,
-    this.imageUrl,
-  });
-
-  factory RecommendedClub.fromJson(Map<String, dynamic> json) {
-  // 👇👇👇 'region' 대신 'sido', 'sigungu' 사용
-  String tags = "${json['sport']} · ${json['sido']} ${json['sigungu']} · 멤버 ${json['member_count']}";
-  
-  return RecommendedClub(
-    name: json['name'],
-    description: json['description'],
-    tags: tags,
-    imageUrl: json['club_image_url'],
-  );
-}
-}
 
 class HomeScreen extends StatefulWidget {
   final String userId;
@@ -491,14 +454,26 @@ class _HomeScreenState extends State<HomeScreen> {
             }).toList(),
             
             // 3. 새로운 아이템이 선택되었을 때
-            onChanged: (int? newValue) {
-              if (newValue == null) return;
-              setState(() {
-                _selectedClubId = newValue;
-              });
-              // TODO: 선택된 동호회의 데이터(_schedule, _feed)를 새로고침하는 API 호출
-              // _fetchClubData(newValue);
-            },
+            onChanged: (int? newId) {
+      if (newId == null) return;
+      
+      // 1. 선택된 클럽 객체 찾기
+      final selectedClub = _myClubs.firstWhere((club) => club.id == newId);
+      
+      // 2. ClubMainScreen으로 이동 (Push)
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ClubMainScreen(
+            club: selectedClub, 
+            userId: widget.userId
+          ),
+        ),
+      );
+      
+      // 참고: 드롭다운 값은 굳이 setState로 바꿀 필요가 없을 수도 있습니다.
+      // (갔다 오면 다시 원래대로 돌아와 있으므로)
+    },
             
             // --- 4. 요청하신 UI 스타일 적용 ---
             decoration: InputDecoration(
