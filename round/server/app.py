@@ -528,12 +528,8 @@ def create_club():
         
         creator_id_int = user_record[0] # Users.id (숫자)
 
-        # 5. 데이터베이스 트랜잭션 시작 (두 테이블에 모두 저장해야 하므로)
-        db_connection.start_transaction()
-
-        # 6. Clubs 테이블에 동호회 정보 삽입
         sql_club = """INSERT INTO Clubs (name, sport, sido, sigungu, description, max_capacity, club_image_url, creator_id)
-                      VALUES (%s, %s, %s, %s, %s, %s, %s)"""
+                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
         val_club = (name, sport, sido, sigungu, description, max_capacity, image_url, creator_id_int)
         cursor.execute(sql_club, val_club)
         
