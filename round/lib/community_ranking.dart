@@ -1,163 +1,260 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:dio/dio.dart';
+import 'package:round/api_client.dart';
+import 'package:round/location_search_screen.dart'; // Ensure this import is correct
+import 'package:round/models/club_models.dart'; // Ensure ClubRank is here
 
-class CommunityRankingScreen extends StatefulWidget {
+class CommunityRankingTab extends StatefulWidget {
   final String userId;
-  const CommunityRankingScreen({super.key, required this.userId});
+  const CommunityRankingTab({super.key, required this.userId});
 
   @override
-  State<CommunityRankingScreen> createState() => _CommunityRankingScreenState();
+  State<CommunityRankingTab> createState() => _CommunityRankingTabState();
 }
 
-class _CommunityRankingScreenState extends State<CommunityRankingScreen> {
-  static const Color _bg = Color(0xFF262626);
+class _CommunityRankingTabState extends State<CommunityRankingTab> {
+  // Palette
   static const Color _lime = Color(0xFFB7F34D);
-  static const Color _iconActive = Colors.white;
-  static const Color _iconInactive = Color(0xFF9CA3AF);
+  static const Color _panel = Color(0xFF2F2F2F);
+  static const Color _chipSel = Color(0xFF60A5FA);
 
-  void _onTapBottom(int index) {
-    if (index == 2) return;
-    final uid = widget.userId;
-    switch (index) {
-      case 0: Navigator.pushReplacementNamed(context, '/home', arguments: uid); break;
-      case 1: Navigator.pushReplacementNamed(context, '/club', arguments: uid); break;
-      case 2: Navigator.pushReplacementNamed(context, '/community', arguments: uid); break;
-      case 3: Navigator.pushReplacementNamed(context, '/mypage', arguments: uid); break;
+  final Dio dio = ApiClient().dio;
+
+  // State
+  String _selectedSport = '볼링';
+  String _sido = '인천광역시'; 
+  String _sigungu = '미추홀구';
+  
+  bool _isLoading = true;
+  List<ClubRank> _rankingList = [];
+
+  final List<String> _sports = const ['볼링', '축구', '풋살', '농구', '3x3 농구', '배드민턴'];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRanking();
+  }
+
+  Future<void> _fetchRanking() async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await dio.get('/api/ranking', queryParameters: {
+        'sport': _selectedSport,
+        'sido': _sido,
+        'sigungu': _sigungu,
+      });
+      final List<dynamic> data = response.data['ranking'];
+      setState(() {
+        _rankingList = data.map((e) => ClubRank.fromJson(e)).toList();
+        _isLoading = false;
+      });
+    } on DioException catch (e) {
+      print("랭킹 로딩 실패: $e");
+      setState(() => _isLoading = false);
     }
   }
 
-  void _goTab(int i) {
-    final uid = widget.userId;
-    if (i == 2) return; // 현재 탭
-    if (i == 0) Navigator.pushReplacementNamed(context, '/communityFriendly', arguments: uid);
-    if (i == 1) Navigator.pushReplacementNamed(context, '/community', arguments: uid);
+  Future<void> _pickLocation() async {
+    final result = await Navigator.push<LocationData>(
+      context,
+      MaterialPageRoute(builder: (context) => const LocationSearchScreen()),
+    );
+    if (result != null) {
+      setState(() {
+        _sido = result.sido;
+        _sigungu = result.sigungu;
+      });
+      _fetchRanking(); 
+    }
   }
 
-  Widget _topTabs({required int selected}) {
-    final tabs = ['친선경기', '동호회', '랭킹'];
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: List.generate(3, (i) {
-          final sel = i == selected;
-          return Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => _goTab(i),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      tabs[i],
-                      style: TextStyle(
-                        color: sel ? Colors.white : Colors.white70,
-                        fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                        fontSize: 14,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      height: 2,
-                      width: sel ? 40 : 0,
-                      decoration: BoxDecoration(
-                        color: sel ? Colors.white : Colors.transparent,
-                        borderRadius: BorderRadius.circular(1),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
-
-  Widget _searchBar() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Container(
-        height: 40,
-        decoration: BoxDecoration(
-          color: const Color(0xFF313131),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF3D3D3D)),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
-          children: const [
-            Icon(Icons.search, color: Colors.white60, size: 20),
-            SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                style: TextStyle(color: Colors.white, fontSize: 14),
-                cursorColor: Colors.white60,
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  hintText: '랭킹 검색',
-                  hintStyle: TextStyle(color: Colors.white54),
-                  border: InputBorder.none,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  String _formatNumber(int n) {
+    return n.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light.copyWith(
-        statusBarColor: Colors.transparent,
-        systemNavigationBarColor: _bg,
-      ),
-      child: Scaffold(
-        backgroundColor: _bg,
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Text(
-                  'Round',
-                  style: TextStyle(color: _lime, fontSize: 22, fontWeight: FontWeight.w700),
-                ),
-              ),
-              const SizedBox(height: 12),
+    // Separate Top 3 and Others
+    List<ClubRank> top3 = [];
+    List<ClubRank> others = [];
+    if (_rankingList.isNotEmpty) {
+      top3 = _rankingList.take(3).toList();
+      if (_rankingList.length > 3) {
+        others = _rankingList.sublist(3);
+      }
+    }
 
-              _topTabs(selected: 2), // 랭킹 탭 선택
-              _searchBar(),          // 검색바 유지
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 20),
 
-              // ▼ 6개 카테고리 박스 제거: 아래는 빈 영역
-              const Expanded(child: SizedBox.shrink()),
-            ],
+        // Location Selector
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: GestureDetector(
+            onTap: _pickLocation,
+            child: Row(
+              children: [
+                Text("$_sido $_sigungu", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(width: 4),
+                const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 28),
+              ],
+            ),
           ),
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: _bg,
-          elevation: 0,
-          currentIndex: 2,
-          selectedItemColor: _iconActive,
-          unselectedItemColor: _iconInactive,
-          showSelectedLabels: false,
-          showUnselectedLabels: false,
-          onTap: _onTapBottom,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.shield_outlined), label: 'Club'),
-            BottomNavigationBarItem(icon: Icon(Icons.groups_2_outlined), label: 'Community'),
-            BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'My'),
-          ],
+        
+        const SizedBox(height: 16),
+
+        // Sport Chips
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            scrollDirection: Axis.horizontal,
+            itemCount: _sports.length,
+            separatorBuilder: (c, i) => const SizedBox(width: 10),
+            itemBuilder: (context, index) {
+              final sport = _sports[index];
+              final isSelected = _selectedSport == sport;
+              return GestureDetector(
+                onTap: () {
+                  setState(() => _selectedSport = sport);
+                  _fetchRanking(); 
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSelected ? _chipSel : Colors.transparent,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: isSelected ? _chipSel : Colors.white),
+                  ),
+                  child: Text(sport, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                ),
+              );
+            },
+          ),
         ),
+
+        const SizedBox(height: 24),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text("Rank", style: TextStyle(color: _lime, fontSize: 20, fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 10),
+
+        // Ranking List
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator(color: _lime))
+              : _rankingList.isEmpty
+                  ? const Center(child: Text("랭킹 정보가 없습니다.", style: TextStyle(color: Colors.white38)))
+                  : ListView(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      children: [
+                        if (top3.isNotEmpty) _buildTop3Card(top3),
+                        
+                        const SizedBox(height: 16),
+                        
+                        ...others.map((club) => _buildRankItem(club)),
+                        
+                        const SizedBox(height: 80), 
+                      ],
+                    ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTop3Card(List<ClubRank> top3) {
+    List<ClubRank?> podium = [
+      top3.length > 1 ? top3[1] : null, 
+      top3[0],                          
+      top3.length > 2 ? top3[2] : null, 
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 10),
+      decoration: BoxDecoration(
+        color: _panel,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (podium[0] != null) _buildPodiumItem(podium[0]!, 2),
+          _buildPodiumItem(podium[1]!, 1),
+          if (podium[2] != null) _buildPodiumItem(podium[2]!, 3),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPodiumItem(ClubRank club, int rank) {
+    final double size = rank == 1 ? 80 : 60;
+    final Color crownColor = rank == 1 ? Colors.amber : (rank == 2 ? Colors.grey : Colors.brown);
+    
+    return Column(
+      children: [
+        Icon(Icons.emoji_events, color: crownColor, size: 30),
+        const SizedBox(height: 4),
+        Container(
+          width: size, height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: crownColor, width: 2),
+            color: Colors.grey[800],
+            image: (club.imageUrl.isNotEmpty && !club.imageUrl.contains('placeholder'))
+                ? DecorationImage(image: NetworkImage(club.imageUrl), fit: BoxFit.cover)
+                : null,
+          ),
+          child: (club.imageUrl.isEmpty || club.imageUrl.contains('placeholder'))
+              ? Center(child: Text(club.name.isNotEmpty ? club.name[0] : "?", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))
+              : null,
+        ),
+        const SizedBox(height: 8),
+        Text(club.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        Text(_formatNumber(club.point), style: const TextStyle(color: _lime, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  Widget _buildRankItem(ClubRank club) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _panel,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 30,
+            child: Text("${club.ranking}", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          ),
+          Container(
+            width: 40, height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.grey[800],
+              image: (club.imageUrl.isNotEmpty && !club.imageUrl.contains('placeholder'))
+                  ? DecorationImage(image: NetworkImage(club.imageUrl), fit: BoxFit.cover)
+                  : null,
+            ),
+             child: (club.imageUrl.isEmpty || club.imageUrl.contains('placeholder'))
+              ? Center(child: Text(club.name.isNotEmpty ? club.name[0] : "?", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))
+              : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(club.name, style: const TextStyle(color: Colors.white, fontSize: 16)),
+          ),
+          Text(_formatNumber(club.point), style: const TextStyle(color: _lime, fontSize: 16, fontWeight: FontWeight.bold)),
+        ],
       ),
     );
   }

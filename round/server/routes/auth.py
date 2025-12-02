@@ -486,3 +486,30 @@ def check_login_status():
         if cursor: cursor.close()
         if db_connection and db_connection.is_connected():
             db_connection.close()
+
+@auth_bp.route("/api/update-fcm-token", methods=["POST"])
+def update_fcm_token():
+    db_connection = None
+    try:
+        if 'user_id' not in session:
+            return jsonify({"success": False}), 401
+
+        data = request.get_json()
+        fcm_token = data.get('fcm_token')
+        
+        db_connection = get_db_connection()
+        cursor = db_connection.cursor()
+        
+        # 현재 사용자의 토큰 업데이트
+        cursor.execute("UPDATE Users SET fcm_token = %s WHERE user_id = %s", 
+                       (fcm_token, session['user_id']))
+        db_connection.commit()
+        
+        return jsonify({"success": True}), 200
+    except Exception as e:
+        current_app.logger.error(f"FCM Update Error: {e}")
+        return jsonify({"success": False}), 500
+    finally:
+        if cursor: cursor.close()
+        if db_connection and db_connection.is_connected():
+            db_connection.close()

@@ -4,6 +4,7 @@ import 'package:round/club_main.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
 import 'package:round/models/club_models.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 
 
@@ -57,7 +58,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _generateWeekData();
-    _fetchData(); // 5. 화면 시작 시 데이터 가져오기
+    _fetchData();
+    _updateFCMToken();
   }
 
   void _generateWeekData() {
@@ -227,6 +229,18 @@ class _HomeScreenState extends State<HomeScreen> {
       // (에러 처리)
       print("Error fetching nearby clubs: $e");
       setState(() => _isNearbyLoading = false);
+    }
+  }
+
+  Future<void> _updateFCMToken() async {
+    try {
+      String? token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await dio.post('/api/update-fcm-token', data: {'fcm_token': token});
+        print("FCM Token Updated");
+      }
+    } catch (e) {
+      print("FCM Token Update Failed: $e");
     }
   }
 

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "129378178208",
+    "project_id": "round-b6d94",
+    "storage_bucket": "round-b6d94.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:129378178208:android:cea3d0f1fafc48ba6ea5c5",
+        "android_client_info": {
+          "package_name": "com.example.round"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCwv64oW7Xg2Z4VrMznhwQ6Ax3OE7KSlYo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

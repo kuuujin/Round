@@ -81,3 +81,29 @@ class ClubInfo {
     );
   }
 }
+
+class ClubRank {
+  final int id;
+  final String name;
+  final String imageUrl;
+  final int point;
+  final int ranking;
+
+  ClubRank({
+    required this.id,
+    required this.name,
+    required this.imageUrl,
+    required this.point,
+    required this.ranking,
+  });
+
+  factory ClubRank.fromJson(Map<String, dynamic> json) {
+    return ClubRank(
+      id: json['id'],
+      name: json['name'],
+      imageUrl: json['club_image_url'] ?? '',
+      point: json['point'],
+      ranking: json['ranking'],
+    );
+  }
+}

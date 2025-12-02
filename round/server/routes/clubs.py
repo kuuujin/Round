@@ -323,3 +323,98 @@ def create_schedule():
         if cursor: cursor.close()
         if db_connection and db_connection.is_connected():
             db_connection.close()
+
+@clubs_bp.route("/api/ranking", methods=["GET"])
+def get_club_ranking():
+    db_connection = None
+    try:
+        sido = request.args.get('sido')
+        sigungu = request.args.get('sigungu')
+        sport = request.args.get('sport')
+
+        # 필터 조건이 없으면 에러 또는 기본값 처리
+        if not sport:
+             return jsonify({"success": False, "error": "종목을 선택해주세요."}), 400
+
+        db_connection = get_db_connection()
+        cursor = db_connection.cursor(dictionary=True)
+
+        # 랭킹 조회 쿼리
+        # 포인트(point) 내림차순으로 정렬
+        sql = """
+            SELECT 
+                id, name, club_image_url, point,
+                RANK() OVER (ORDER BY point DESC) as ranking
+            FROM Clubs
+            WHERE sport = %s
+        """
+        params = [sport]
+
+        if sido:
+            sql += " AND sido = %s"
+            params.append(sido)
+        
+        if sigungu:
+            sql += " AND sigungu = %s"
+            params.append(sigungu)
+
+        sql += " ORDER BY point DESC LIMIT 50" # 상위 50개만
+
+        cursor.execute(sql, tuple(params))
+        ranking_list = cursor.fetchall()
+
+        return jsonify({"success": True, "ranking": ranking_list}), 200
+
+    except mysql.connector.Error as e:
+        current_app.logger.error(f"DB Error (ranking): {e}")
+        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
+    finally:
+        if cursor: cursor.close()
+        if db_connection and db_connection.is_connected():
+            db_connection.close()
+
+@clubs_bp.route("/api/clubs/list", methods=["GET"])
+def get_clubs_list():
+    db_connection = None
+    cursor = None
+    try:
+        # 1. 파라미터 받기
+        sido = request.args.get('sido')       # 예: '인천광역시'
+        sport = request.args.get('sport')     # 예: '볼링'
+        keyword = request.args.get('keyword') # 검색어 (선택)
+
+        db_connection = get_db_connection()
+        cursor = db_connection.cursor(dictionary=True)
+
+        # 2. SQL 쿼리 작성
+        # 기본적으로 sido와 sport는 필수 조건으로 검색합니다.
+        sql = """
+            SELECT 
+                C.id, C.name, C.description, C.sport, C.sido, C.sigungu, C.club_image_url,
+                C.max_capacity,
+                (SELECT COUNT(*) FROM ClubMembers CM WHERE CM.club_id = C.id) AS member_count
+            FROM Clubs C
+            WHERE C.sido = %s AND C.sport = %s
+        """
+        params = [sido, sport]
+
+        # 3. 검색어(keyword)가 있다면 제목(name) 검색 조건 추가
+        if keyword:
+            sql += " AND C.name LIKE %s"
+            params.append(f"%{keyword}%")
+
+        # 4. 정렬: 최근 생성순, 또는 멤버 많은 순
+        sql += " ORDER BY C.created_at DESC"
+
+        cursor.execute(sql, tuple(params))
+        clubs = cursor.fetchall()
+
+        return jsonify({"success": True, "clubs": clubs}), 200
+
+    except mysql.connector.Error as e:
+        current_app.logger.error(f"DB Error (get_clubs_list): {e}")
+        return jsonify({"success": False, "error": "DB 오류"}), 500
+    finally:
+        if cursor: cursor.close()
+        if db_connection and db_connection.is_connected():
+            db_connection.close()

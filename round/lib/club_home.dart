@@ -138,19 +138,6 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
               style: const TextStyle(color: _lime, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5),
             ),
           ),
-          ElevatedButton(
-            onPressed: () {
-              // TODO: 가입 신청 동작 (이미 멤버라면 '탈퇴' 또는 숨김 처리)
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3B3B3B),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              elevation: 0,
-            ),
-            child: const Text('가입 신청', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
-          ),
         ],
       ),
     );

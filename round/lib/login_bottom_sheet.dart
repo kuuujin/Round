@@ -48,7 +48,7 @@ class _LoginBottomSheetState extends State<LoginBottomSheet> { // New State clas
         if (!mounted) return;
         Navigator.pop(context); // Close the bottom sheet
 
-        Navigator.pushReplacementNamed(context, '/home', arguments: loggedInUserId,); // Example navigation
+        Navigator.pushReplacementNamed(context, '/home', arguments: loggedInUserId,);
 
       } else {
          // Handle cases where API returns success: false but status 200 (should ideally be 401)
