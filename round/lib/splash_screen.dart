@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
-import 'login_screen.dart'; 
+import 'login_screen.dart';
+import 'package:round/user_provider.dart';
+import 'package:round/fcm_utils.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -47,6 +49,13 @@ class _SplashScreenState extends State<SplashScreen> {
       
       if (response.statusCode == 200 && response.data['success'] == true) {
         final String userId = response.data['user']['user_id'];
+        final userData = response.data['user'];
+        UserProvider().setUser(
+          userData['user_id'], 
+          userData['name'], 
+          userData['role']
+        );
+        await updateServerToken();
         if (!mounted) return;
         Navigator.pushReplacementNamed(context, '/home', arguments: userId);
       } else {

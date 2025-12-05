@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'write_post.dart';
 import 'package:dio/dio.dart';
 import 'post_detail.dart'; // 파일명 확인
 import 'package:round/api_client.dart';
-import 'package:round/models/post_models.dart'; // Post, Comment 모델
+import 'package:round/models/club_models.dart'; // Post, Comment 모델
 
 class ClubBoardScreen extends StatefulWidget {
   final int clubId;

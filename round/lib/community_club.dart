@@ -126,12 +126,36 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildSearchBar(),
-        _buildCategoryGrid(),
-        _buildClubListArea(),
-      ],
+    // 탭 내부에서도 FAB를 쓰기 위해 Scaffold로 감쌉니다.
+    // (배경색은 부모 화면과 맞추기 위해 transparent 또는 _bg 색상 사용)
+    return Scaffold(
+      backgroundColor: Colors.transparent, // 부모 배경색 유지
+      
+      // 기존 UI 내용
+      body: Column(
+        children: [
+          _buildSearchBar(),
+          _buildCategoryGrid(),
+          _buildClubListArea(),
+        ],
+      ),
+
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'fab_create_club_community', 
+        backgroundColor: _lime,
+        foregroundColor: const Color(0xFF1F2937),
+        elevation: 4,
+        onPressed: () {
+          // 동호회 생성 화면으로 이동
+          Navigator.pushNamed(
+            context,
+            '/createClub',
+            arguments: widget.userId,
+          );
+        },
+        child: const Icon(Icons.add, size: 28),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 

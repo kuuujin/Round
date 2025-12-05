@@ -418,3 +418,62 @@ def get_clubs_list():
         if cursor: cursor.close()
         if db_connection and db_connection.is_connected():
             db_connection.close()
+
+@clubs_bp.route("/api/club/<int:club_id>/schedules", methods=["GET"])
+def get_club_schedules(club_id):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    # 1. Schedules 테이블 조회
+    # DB의 schedule_date를 가져옵니다.
+    sql = """
+        SELECT id, title, description, location, 
+               schedule_date,  -- DB의 datetime 필드 그대로 가져옴
+               is_match, opponent_name, 
+               max_participants, current_participants
+        FROM Schedules 
+        WHERE club_id = %s AND schedule_date >= NOW()
+        ORDER BY schedule_date ASC 
+        LIMIT 5
+    """
+    cursor.execute(sql, (club_id,))
+    schedules = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    # datetime 객체는 JSON 직렬화가 안 되므로 문자열로 변환하여 전송
+    for s in schedules:
+        s['schedule_date'] = s['schedule_date'].strftime('%Y-%m-%d %H:%M:%S')
+
+    return jsonify({"success": True, "schedules": schedules}), 200
+
+
+@clubs_bp.route("/api/club/<int:club_id>/posts", methods=["GET"])
+def get_club_posts(club_id):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    # 2. Posts 테이블 + Users 테이블 조인
+    # user_name을 author_name으로 별칭(alias) 지정
+    sql = """
+        SELECT P.id, P.title, P.content, P.likes, P.image_url,
+               P.created_at,
+               U.name as author_name, -- 작성자 이름 가져오기
+               0 as comment_count     -- (임시) 댓글 수는 0으로 처리
+        FROM Posts P
+        JOIN Users U ON P.user_id = U.id
+        WHERE P.club_id = %s
+        ORDER BY P.created_at DESC 
+        LIMIT 5
+    """
+    cursor.execute(sql, (club_id,))
+    posts = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+
+    for p in posts:
+        p['created_at'] = p['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+
+    return jsonify({"success": True, "posts": posts}), 200

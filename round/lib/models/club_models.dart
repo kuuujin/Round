@@ -107,3 +107,119 @@ class ClubRank {
     );
   }
 }
+
+class Schedule {
+  final int id;
+  final String title;
+  final String description;
+  final String location;
+  final bool isMatch;
+  final String? opponentName;
+  final int maxParticipants;
+  final int currentParticipants;
+  
+  // 👇👇👇 [수정] 쪼개진 변수들을 지우고 이거 하나로 통합합니다.
+  final String startTime; // 예: "2025-12-05 14:30:00"
+
+  Schedule({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.location,
+    required this.isMatch,
+    this.opponentName,
+    required this.maxParticipants,
+    required this.currentParticipants,
+    required this.startTime, // 생성자 수정
+  });
+
+  factory Schedule.fromJson(Map<String, dynamic> json) {
+    return Schedule(
+      id: json['id'],
+      title: json['title'],
+      description: json['description'] ?? '',
+      location: json['location'],
+      isMatch: (json['is_match'] == 1 || json['is_match'] == true),
+      opponentName: json['opponent_name'],
+      maxParticipants: json['max_participants'],
+      currentParticipants: json['current_participants'] ?? 0,
+      
+      // 👇👇👇 [수정] DB의 'schedule_date'를 그대로 문자열로 받습니다.
+      startTime: json['schedule_date'].toString(),
+    );
+  }
+}
+
+class Post {
+  final int id;
+  final String title;
+  final String content;
+  final String time;        // UI에서는 createdAt으로 쓰려던 것
+  final int likes;          // UI에서는 likeCount로 쓰려던 것
+  final int comments;
+  final String? imageUrl;   // 게시글 이미지
+  final String authorName;  // UI에서는 userName으로 쓰려던 것
+  
+  // 👇👇👇 [추가] 프로필 이미지 필드 추가
+  final String? profileImage; 
+
+  Post({
+    required this.id,
+    required this.title,
+    required this.content,
+    required this.time,
+    required this.likes,
+    required this.comments,
+    this.imageUrl,
+    required this.authorName,
+    this.profileImage, // 생성자 추가
+  });
+
+  factory Post.fromJson(Map<String, dynamic> json) {
+    // 날짜 포맷팅 (YYYY-MM-DD)
+    String rawDate = json['created_at'].toString();
+    String formattedDate = rawDate.length > 10 ? rawDate.substring(0, 10) : rawDate;
+
+    return Post(
+      id: json['id'],
+      title: json['title'] ?? '', // null 방지
+      content: json['content'] ?? '',
+      time: formattedDate, 
+      likes: json['likes'] ?? 0,
+      comments: json['comment_count'] ?? 0,
+      imageUrl: json['image_url'],
+      authorName: json['author_name'] ?? '익명', 
+      
+      // 👇👇👇 [추가] JSON 매핑
+      profileImage: json['profile_image'], 
+    );
+  }
+}
+
+class Comment {
+  final int id;
+  final String content;
+  final String time;        // UI에서 comment.time 사용 중
+  final String authorName;  // UI에서 comment.authorName 사용 중
+  final String? authorImage;
+
+  Comment({
+    required this.id,
+    required this.content,
+    required this.time,
+    required this.authorName,
+    this.authorImage,
+  });
+
+  factory Comment.fromJson(Map<String, dynamic> json) {
+    return Comment(
+      id: json['id'],
+      content: json['content'],
+      // 1. created_at -> time
+      time: json['created_at'].toString().substring(0, 16), 
+      // 2. user_name -> authorName
+      authorName: json['user_name'] ?? '익명', 
+      authorImage: json['user_image'],
+    );
+  }
+}

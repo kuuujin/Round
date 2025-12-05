@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
 import 'club_board.dart';
-import 'package:round/models/post_models.dart';
+import 'package:round/models/club_models.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final Post post; // 목록에서 넘겨받은 게시글 객체

@@ -3,6 +3,8 @@ import 'package:dio/dio.dart'; // Import Dio
 import 'package:round/api_client.dart'; // Import ApiClient
 import 'find_id_screen.dart';
 import 'reset_pw_screen.dart';
+import 'package:round/user_provider.dart';
+import 'package:round/fcm_utils.dart';
 
 class LoginBottomSheet extends StatefulWidget { // Changed to StatefulWidget
   const LoginBottomSheet({super.key});
@@ -44,6 +46,13 @@ class _LoginBottomSheetState extends State<LoginBottomSheet> { // New State clas
         // Login Successful
         final userData = response.data['user'];
         final String loggedInUserId = userData['user_id'];
+
+        UserProvider().setUser(
+          userData['user_id'], 
+          userData['name'], 
+          userData['role']
+        );
+        await updateServerToken();
 
         if (!mounted) return;
         Navigator.pop(context); // Close the bottom sheet

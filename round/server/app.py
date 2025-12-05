@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+from utils.db import get_db_connection
 from flask import Flask, request, session, jsonify
 from flask_socketio import SocketIO, emit, join_room
 import firebase_admin
@@ -54,19 +55,33 @@ def handle_join_chat(data):
 
 @socketio.on('send_message')
 def handle_send_message(data):
-    room = data.get('room')
+    room = data.get('room') # match_id
     message = data.get('message')
-    user_id = data.get('user_id')
+    user_id_str = data.get('user_id') # 클라이언트가 보낸 user_id (문자열)
     
-    print(f"📩 Message in {room}: {message}")
+    # DB 연결
+    db_connection = get_db_connection()
+    cursor = db_connection.cursor()
     
-    # 나를 제외한 방 안의 다른 사람들에게 메시지 전송
-    emit('new_message', {
-        'sender': 'opponent', # 받는 사람 입장에서는 '상대방'임
-        'message': message,
-        'user_id': user_id
-    }, room=room, include_self=False)
+    # user_id(문자열) -> id(숫자) 변환
+    cursor.execute("SELECT id FROM Users WHERE user_id = %s", (user_id_str,))
+    user = cursor.fetchone()
+    if user:
+        user_db_id = user[0]
+        # 메시지 저장
+        cursor.execute("INSERT INTO ChatMessages (match_id, user_id, message) VALUES (%s, %s, %s)", 
+                       (room, user_db_id, message))
+        db_connection.commit()
 
+    cursor.close()
+    db_connection.close()
+    
+    # 전송 (기존 로직 동일)
+    print(f"📩 Message saved & sent in {room}: {message}")
+    emit('new_message', {
+        'sender': user_id_str, 
+        'message': message
+    }, room=room)
 
             
 if __name__ == "__main__":

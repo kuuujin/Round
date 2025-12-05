@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
-import 'package:round/models/schedule_model.dart';
+import 'package:round/models/club_models.dart';
 import 'package:round/add_schedule.dart';
 
 class ClubScheduleScreen extends StatefulWidget {
@@ -53,6 +53,8 @@ class _ClubScheduleScreenState extends State<ClubScheduleScreen> {
       });
       
       final List<dynamic> data = response.data['schedules'];
+      final List<Schedule> schedules = data.map((json) => Schedule.fromJson(json)).toList();
+
       setState(() {
         _schedules = data.map((json) => Schedule.fromJson(json)).toList();
         _isLoading = false;
@@ -131,10 +133,14 @@ class _ClubScheduleScreenState extends State<ClubScheduleScreen> {
   // ---------------- 데이터 -> UI 매핑 빌더 ----------------
   Widget _buildScheduleItem(Schedule schedule) {
     // 날짜 문자열 파싱 (예: "2023-09-17" -> "9월 17일")
-    final dateParts = schedule.dateStr.split('-'); // [2023, 09, 17]
-    final month = int.parse(dateParts[1]);
-    final day = int.parse(dateParts[2]);
-    final dateDisplay = "$month월 $day일";
+    DateTime dt = DateTime.parse(schedule.startTime);
+    final dateDisplay = "${dt.month}월 ${dt.day}일";
+    
+    // 시간 문자열 생성 (오후 2:30)
+    String ampm = dt.hour >= 12 ? '오후' : '오전';
+    int hour = dt.hour > 12 ? dt.hour - 12 : dt.hour;
+    if (hour == 0) hour = 12;
+    String timeStr = "$hour:${dt.minute.toString().padLeft(2, '0')}";
 
     // 마감 여부 확인 (현재인원 >= 최대인원)
     final bool isClosed = schedule.currentParticipants >= schedule.maxParticipants;
@@ -143,9 +149,9 @@ class _ClubScheduleScreenState extends State<ClubScheduleScreen> {
       return _matchCard(
         tag: "동호회 매치",
         date: dateDisplay,
-        ap: schedule.ampm,
-        time: schedule.timeStr,
-        a: "우리팀", // TODO: 내 클럽 이름으로 변경 가능
+        ap: ampm,       // 수정된 변수 사용
+        time: timeStr,  // 수정된 변수 사용
+        a: "우리팀",
         b: schedule.opponentName ?? "상대팀",
         place: schedule.location,
         cur: schedule.currentParticipants,
@@ -156,11 +162,11 @@ class _ClubScheduleScreenState extends State<ClubScheduleScreen> {
       return _regularCard(
         tag: "정기 모임",
         date: dateDisplay,
-        ap: schedule.ampm,
-        time: schedule.timeStr,
+        ap: ampm,       // 수정된 변수 사용
+        time: timeStr,  // 수정된 변수 사용
         title: schedule.title,
-        sub1: schedule.location, // 장소
-        sub2: schedule.description, // 설명
+        sub1: schedule.location,
+        sub2: schedule.description,
         cur: schedule.currentParticipants,
         max: schedule.maxParticipants,
         closed: isClosed,

@@ -3,7 +3,11 @@ import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'chat_screen.dart';
+import 'package:round/friendly_match_detail_screen.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 
 class CommunityFriendlyTab extends StatefulWidget {
   final String userId;
@@ -27,7 +31,7 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
   bool _isSearching = false; // 매칭 중인지 여부
   int? _myClubId; // 내 동호회 ID (매칭 신청 주체)
   String? _myClubName;
-  List<dynamic> _myClubsList = [];
+  List<dynamic> _myClubsList = []; // 드롭다운용 동호회 목록
 
   // Matching Preferences
   String _selectedDay = 'ANY'; 
@@ -40,8 +44,8 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
   void initState() {
     super.initState();
     _fetchMyClubs(); // 1. 내 클럽 정보 가져오기
-    _initSocket();
-    _initFCM();      // 2. 소켓 초기화
+    _initSocket();   // 2. 소켓 초기화
+    _initFCM();      // 3. FCM 초기화
   }
 
   @override
@@ -55,18 +59,20 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
       final response = await dio.get('/api/my-clubs');
       final List<dynamic> clubs = response.data['clubs'];
       
-      setState(() {
-        _myClubsList = clubs;
-        if (clubs.isNotEmpty) {
-          // 기본값: 첫 번째 동호회 선택
-          _myClubId = clubs[0]['id'];
-          _myClubName = clubs[0]['name'];
-        }
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _myClubsList = clubs;
+          if (clubs.isNotEmpty) {
+            // 기본값: 첫 번째 동호회 선택
+            _myClubId = clubs[0]['id'];
+            _myClubName = clubs[0]['name'];
+          }
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       print("내 동호회 로드 실패: $e");
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -80,63 +86,27 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
 
     socket.onConnect((_) {
       print('✅ 소켓 서버 연결됨');
+      print("🚪 방 입장 요청: ${widget.userId}");
       socket.emit('join', {'user_id': widget.userId});
     });
 
-    // 매칭 성공 이벤트 수신
+    // 매칭 성공 이벤트 수신 (대기자용)
     socket.on('match_found', (data) {
-      print('🎉 매칭 성공: $data');
+      print('🎉 [Socket] 매칭 성공: $data');
       if (!mounted) return;
 
       setState(() => _isSearching = false);
       
-      // 매칭 성공 다이얼로그
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF333333),
-          title: const Text("🎉 매칭 성공!", style: TextStyle(color: _lime, fontWeight: FontWeight.bold)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text("상대팀: ${data['opponent_name']}", style: const TextStyle(color: Colors.white, fontSize: 18)),
-              const SizedBox(height: 10),
-              const Text("경기 일정 조율을 위해\n채팅방으로 이동하시겠습니까?", style: TextStyle(color: Colors.white70)),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(ctx); // 1. 다이얼로그 닫기
-                
-                // 2. 채팅 화면으로 이동
-                // data['match_id']가 있는지 확인 필수
-                if (data['match_id'] != null) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ChatScreen(
-                        matchId: data['match_id'],     // 서버에서 받은 방 ID
-                        userId: widget.userId,         // 내 ID
-                        opponentName: data['opponent_name'], // 상대 팀 이름
-                      ),
-                    ),
-                  );
-                } else {
-                   print("오류: match_id가 없습니다.");
-                }
-              },
-              child: const Text("이동", style: TextStyle(color: _lime, fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
+      // 매칭 성공 다이얼로그 띄우기
+      _showMatchSuccessDialog(
+        opponentName: data['opponent_name'] ?? '상대팀',
+        matchId: data['match_id'],
       );
     });
 
     socket.on('match_error', (data) {
       print('❌ 매칭 에러: $data');
+      if (!mounted) return;
       setState(() => _isSearching = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("오류 발생: ${data['error']}")));
     });
@@ -144,38 +114,75 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
     socket.connect();
   }
 
-  // 3. 매칭 시작 요청
+  // 3. 매칭 시작 요청 (신청자용)
   void _startMatching() async {
+    if (_myClubId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("참가할 팀을 선택해주세요.")));
+      return;
+    }
+
+    if (socket.id == null) {
+      print("⚠️ 소켓이 아직 연결되지 않았습니다. 재연결 시도...");
+      socket.connect();
+      // 연결될 때까지 잠시 대기 (최대 2초)
+      int retry = 0;
+      while (socket.id == null && retry < 20) {
+        await Future.delayed(const Duration(milliseconds: 100));
+        retry++;
+      }
+      
+      if (socket.id == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("서버 연결 중입니다. 잠시 후 다시 시도해주세요.")));
+        return;
+      }
+    }
+
     setState(() => _isLoading = true); // 잠깐 로딩만 보여줌
 
     try {
       final response = await dio.post('/api/match/request', data: {
+        'user_id': widget.userId, // 사용자 ID도 함께 전송 (서버 로직에 따라 필요할 수 있음)
         'club_id': _myClubId,
         'preferred_day': _selectedDay,
         'preferred_time': _selectedTime,
+        'socket_id': socket.id, // 소켓 ID 전송 필수
       });
-
-      // 성공 시 알림창만 띄우고 로딩 해제 (화면 유지 or 이동 자유)
+      
       if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF333333),
-          title: const Text("매칭 대기 시작", style: TextStyle(color: _lime)),
-          content: Text(response.data['message'], style: const TextStyle(color: Colors.white70)), // "대기열에 등록되었습니다..."
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("확인"),
-            )
-          ],
-        ),
-      );
+      setState(() => _isLoading = false);
+
+      final data = response.data;
+
+      // HTTP 응답으로 바로 매칭된 경우 (신청자)
+      if (data['status'] == 'MATCHED') {
+        print("🎉 [HTTP] 즉시 매칭 성공!");
+        _showMatchSuccessDialog(
+          opponentName: data['opponent_name'] ?? '상대팀', 
+          matchId: data['match_id']
+        );
+      } else {
+        // 대기열 등록된 경우
+        setState(() => _isSearching = true);
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: const Color(0xFF333333),
+            title: const Text("매칭 대기 시작", style: TextStyle(color: _lime)),
+            content: Text(data['message'] ?? "대기열에 등록되었습니다.", style: const TextStyle(color: Colors.white70)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("확인", style: TextStyle(color: Colors.white)),
+              )
+            ],
+          ),
+        );
+      }
 
     } on DioException catch (e) {
-      // 에러 처리
-    } finally {
-      setState(() => _isLoading = false);
+      print("매칭 요청 실패: $e");
+      if (mounted) setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("요청 실패")));
     }
   }
 
@@ -183,23 +190,87 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
   void _cancelMatching() {
     setState(() => _isSearching = false);
     // socket.emit('cancel_match'); // 필요하다면 서버에 취소 이벤트 전송
+    // 소켓 재연결로 상태 초기화 (간편한 방법)
     socket.disconnect();
-    socket.connect(); // 재연결하여 상태 초기화
+    socket.connect(); 
+  }
+
+  // 5. 공통 매칭 성공 다이얼로그
+  void _showMatchSuccessDialog({required String opponentName, String? matchId}) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF333333),
+        title: const Text("🎉 매칭 성공!", style: TextStyle(color: _lime, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("상대팀: $opponentName", style: const TextStyle(color: Colors.white, fontSize: 18)),
+            const SizedBox(height: 10),
+            const Text("경기 일정 조율을 위해\n채팅방으로 이동하시겠습니까?", style: TextStyle(color: Colors.white70)),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx); // 다이얼로그 닫기
+              
+              if (matchId != null && matchId.isNotEmpty) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => FriendlyMatchDetailScreen(
+                      matchId: matchId,       // 서버에서 받은 방 ID
+                      opponentName: opponentName, // 상대 팀 이름
+                    ),
+                  ),
+                );
+              } else {
+                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("채팅방 ID 오류")));
+              }
+            },
+            child: const Text("이동", style: TextStyle(color: _lime, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _initFCM() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      // 앱이 켜져 있을 때 푸시 알림이 오면 실행됨
       print('FCM 메시지 수신: ${message.notification?.title}');
-      
-      // 💡 중요: 소켓이 연결되어 있다면 소켓 이벤트(match_found)가 이미 UI를 처리했을 것입니다.
-      // 따라서 여기서는 아무것도 안 하거나, 소켓 연결이 끊긴 특수 상황에만 스낵바를 띄울 수 있습니다.
-      if (!socket.connected) {
-         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("${message.notification?.title}: ${message.notification?.body}"))
-         );
-         _isSearching = false; // 검색 중 상태 해제
-         setState(() {});
+      if (!mounted) return;
+
+      // 👇👇👇 앱이 켜져 있을 때 알림창 띄우기 👇👇👇
+      RemoteNotification? notification = message.notification;
+      AndroidNotification? android = message.notification?.android;
+
+      // 소켓이 끊겨있거나, 단순히 알림을 보여주고 싶을 때
+      if (notification != null && android != null) {
+        flutterLocalNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          const NotificationDetails(
+            android: AndroidNotificationDetails(
+              'high_importance_channel', // 채널 ID
+              'High Importance Notifications',
+              channelDescription: '알림 채널 설명',
+              icon: '@mipmap/ic_launcher',
+              importance: Importance.max,
+              priority: Priority.high,
+            ),
+          ),
+          // (선택) 알림 클릭 시 전달할 데이터
+          payload: message.data.toString(), 
+        );
+        
+        // 상태 업데이트
+        if (!socket.connected) {
+             setState(() => _isSearching = false);
+        }
       }
     });
   }
@@ -211,7 +282,7 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
     }
 
     // 가입된 동호회가 없을 때
-    if (_myClubId == null) {
+    if (_myClubsList.isEmpty) {
       return const Center(
         child: Text("동호회에 먼저 가입해주세요.", style: TextStyle(color: Colors.white54)),
       );
@@ -262,8 +333,9 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
           children: [
             const SizedBox(height: 20),
             const Text("매칭 조건을 선택하세요", style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 40),
+            const SizedBox(height: 30),
 
+            // 동호회 선택 드롭다운
             _buildSectionTitle("참가 팀 선택"),
             const SizedBox(height: 12),
             Container(
@@ -283,7 +355,6 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
                     if (newValue == null) return;
                     setState(() {
                       _myClubId = newValue;
-                      // ID로 이름 찾기
                       final selectedClub = _myClubsList.firstWhere((club) => club['id'] == newValue);
                       _myClubName = selectedClub['name'];
                     });
@@ -297,7 +368,6 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
                 ),
               ),
             ),
-            // 👆👆👆 여기까지 추가 👆👆👆
 
             const SizedBox(height: 30),
 
@@ -350,12 +420,13 @@ class _CommunityFriendlyTabState extends State<CommunityFriendlyTab> {
             
             const SizedBox(height: 20),
             Text("참가 팀: $_myClubName", style: const TextStyle(color: Colors.white38, fontSize: 13)),
+            // 아래에 여백 추가 (BottomNavBar 가림 방지)
+            const SizedBox(height: 80),
           ],
         ),
       ),
     );
   }
-
   // --- Helper Widgets ---
 
   Widget _buildSectionTitle(String title) {

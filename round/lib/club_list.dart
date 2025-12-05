@@ -18,6 +18,7 @@ class _ClubListScreenState extends State<ClubListScreen> {
   static const Color _iconActive = Colors.white;
   static const Color _iconInactive = Color(0xFF9CA3AF);
 
+
   List<MyClub> _myClubs = [];
   bool _isLoading = true;
   final Dio dio = ApiClient().dio;
@@ -45,7 +46,7 @@ class _ClubListScreenState extends State<ClubListScreen> {
     }
   }
 
-  // 👇👇👇 하단 탭 이동 함수 추가 👇👇👇
+
   void _onTapBottom(int index) {
     if (index == _currentIndex) return;
     final uid = widget.userId;
@@ -64,7 +65,6 @@ class _ClubListScreenState extends State<ClubListScreen> {
         break;
     }
   }
-  // 👆👆👆
 
   @override
   Widget build(BuildContext context) {
@@ -106,7 +106,6 @@ class _ClubListScreenState extends State<ClubListScreen> {
                   },
                 ),
       
-      // 👇👇👇 하단 네비게이션 바 추가 👇👇👇
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
         backgroundColor: _bg,
@@ -123,8 +122,6 @@ class _ClubListScreenState extends State<ClubListScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.person_outline), label: 'My'),
         ],
       ),
-      // 👆👆👆
-    
     );
   }
 }

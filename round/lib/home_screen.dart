@@ -5,7 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
 import 'package:round/models/club_models.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-
+import 'package:intl/intl.dart';
 
 
 class HomeScreen extends StatefulWidget {
@@ -31,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final int _currentIndex = 0;
   bool _isLoading = true; // 1. 로딩 상태 추가
   bool _isNearbyLoading = false;
+  bool _isClubDataLoading = false;
   bool _userIsInClubs = false; // 2. 동호회 가입 여부 상태
   int? _selectedClubId; // 3. 선택된 동호회 탭 인덱스
   int _selectedDateIndex = 0; // 4. 선택된 날짜 인덱스
@@ -39,11 +40,11 @@ class _HomeScreenState extends State<HomeScreen> {
   List<MyClub> _myClubs = [];
   List<RecommendedClub> _nearbyClubs = [];
   List<Map<String, String>> _dates = [];
-  Map<String, String?> _userLocations = {}; // 예: {'primary_sido': '인천광역시', ...}
+  List<Schedule> _schedules = []; 
+  List<Post> _posts = [];
+  Map<String, String?> _userLocations = {};
   // 2. 지역 선택 드롭다운에 표시할 옵션 리스트
   List<Map<String, dynamic>> _locationOptions = [];
-  // 3. 현재 드롭다운에서 선택된 값 (이 값으로 '내 주변 동호회' API를 호출)
-  // key: 'label' (예: '🏠 주 활동지역'), value: {'sido': '인천광역시', 'sigungu': '미추홀구'}
   Map<String, dynamic>? _currentLocationContext;
   final Dio dio = ApiClient().dio;
 
@@ -66,15 +67,11 @@ class _HomeScreenState extends State<HomeScreen> {
     final List<Map<String, String>> newDates = [];
     final today = DateTime.now();
 
-    // 1. 오늘이 속한 주의 월요일을 찾습니다.
-    // (DateTime.weekday는 월요일=1, 일요일=7 입니다.)
-    final int daysToSubtract = today.weekday - 1; // 월요일(1)이면 0, 일요일(7)이면 6
+    final int daysToSubtract = today.weekday - 1;
     final DateTime monday = today.subtract(Duration(days: daysToSubtract));
 
-    // 2. 한국어 요일 맵
     const List<String> weekdays = ['월', '화', '수', '목', '금', '토', '일'];
 
-    // 3. 월요일부터 7일간(일요일까지) 반복
     for (int i = 0; i < 7; i++) {
       final DateTime currentDay = monday.add(Duration(days: i));
       newDates.add({
@@ -86,8 +83,6 @@ class _HomeScreenState extends State<HomeScreen> {
     // 4. 상태를 업데이트하여 UI에 반영
     setState(() {
       _dates = newDates; // 새로 생성된 날짜 리스트로 교체
-      // 5. 오늘 날짜의 인덱스를 계산하여 _selectedDateIndex로 설정
-      // (today.weekday - 1)은 0(월) ~ 6(일)이 됩니다.
       _selectedDateIndex = today.weekday - 1;
     });
   }
@@ -148,7 +143,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchHomeData({required String category, required Map<String, dynamic> location}) async {
-    // _fetchData는 초기 로딩용, _isNearbyLoading은 부분 로딩용
     setState(() {
       _isLoading = true;
       _isNearbyLoading = true;
@@ -160,13 +154,12 @@ class _HomeScreenState extends State<HomeScreen> {
         dio.get('/api/recommended-clubs',
           queryParameters: {
             'category': category,
-            'sido': location['sido'],       // 👈 수정된 API 파라미터
-            'sigungu': location['sigungu'] // 👈 수정된 API 파라미터
+            'sido': location['sido'],      
+            'sigungu': location['sigungu'] 
           },
         )
       ]);
       
-      // ... (myClubs, nearbyClubs 파싱 로직은 동일) ...
       final myClubsResponse = responses[0];
       final List<dynamic> myClubsData = myClubsResponse.data['clubs'];
       final List<MyClub> myClubs = myClubsData.map((data) => MyClub.fromJson(data)).toList();
@@ -180,8 +173,10 @@ class _HomeScreenState extends State<HomeScreen> {
         _userIsInClubs = myClubs.isNotEmpty;
         _nearbyClubs = nearbyClubs;
         
-        if (_userIsInClubs && _selectedClubId == null) { // 👈 _selectedClubId가 비어있을 때만 초기화
-          _selectedClubId = myClubs.first.id;
+        if (_userIsInClubs) {
+           _selectedClubId ??= myClubs.first.id;
+           
+           _fetchClubData(_selectedClubId!); 
         }
         
         _isLoading = false;
@@ -197,14 +192,39 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // TODO: 동호회 탭 클릭 시 일정/피드를 불러오는 함수 (추후 구현)
-  // Future<void> _fetchClubData(int clubId) async { ... }
+  Future<void> _fetchClubData(int clubId) async {
+    setState(() => _isClubDataLoading = true);
+    try {
+      // 두 API 동시 호출
+      final responses = await Future.wait([
+        dio.get('/api/club/$clubId/schedules'),
+        dio.get('/api/club/$clubId/posts'),
+      ]);
 
-  // ... ( _onTapBottom, _generateWeekData 함수는 동일) ...
+      // 1. 일정 데이터 파싱
+      final scheduleList = responses[0].data['schedules'] as List;
+      final schedules = scheduleList.map((j) => Schedule.fromJson(j)).toList();
+
+      // 2. 게시글 데이터 파싱
+      final postList = responses[1].data['posts'] as List;
+      final posts = postList.map((j) => Post.fromJson(j)).toList();
+
+      setState(() {
+        _schedules = schedules;
+        _posts = posts;
+        _isClubDataLoading = false;
+      });
+      
+    } catch (e) {
+      print("Club Data Fetch Error: $e");
+      setState(() => _isClubDataLoading = false);
+    }
+  }
+
 
   Future<void> _fetchNearbyClubs(String category) async {
     setState(() {
-      _isNearbyLoading = true; // 👈 '내 주변 동호회' 섹션만 로딩 시작
+      _isNearbyLoading = true; // 
       _selectedCategory = category; // 선택된 카테고리 상태 업데이트
     });
     final location = _currentLocationContext!['value'];
@@ -222,7 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final List<RecommendedClub> nearbyClubs = nearbyClubsData.map((data) => RecommendedClub.fromJson(data)).toList();
 
       setState(() {
-        _nearbyClubs = nearbyClubs; // 👈 목록을 새 데이터로 교체
+        _nearbyClubs = nearbyClubs; 
         _isNearbyLoading = false;
       });
     } on DioException catch (e) {
@@ -276,10 +296,9 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
         backgroundColor: _bg,
         appBar: AppBar(
-          backgroundColor: _bg, // AppBar 배경색
+          backgroundColor: _bg,
           elevation: 0, // 그림자 제거
-          automaticallyImplyLeading: false, // 뒤로가기 버튼 자동 생성 방지
-          // 3. 기존 "Round" 텍스트를 title로 이동
+          automaticallyImplyLeading: false,
           title: const Text(
             'Round',
             style: TextStyle(
@@ -288,7 +307,6 @@ class _HomeScreenState extends State<HomeScreen> {
               fontWeight: FontWeight.w700,
             ),
           ),
-          // 4. 로그아웃 버튼을 actions (AppBar의 오른쪽 영역)로 이동
           actions: [
             IconButton(
               icon: const Icon(Icons.logout, color: Colors.white70),
@@ -302,8 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         body: SafeArea(
           bottom: false,
-          // 5. Stack 위젯 제거
-          child: SingleChildScrollView( // 6. SingleChildScrollView를 body의 메인 위젯으로
+          child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -355,7 +372,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 24),
                 _buildNearbyClubList(),
 
-                const SizedBox(height: 100), // FAB을 위한 하단 여백
+                const SizedBox(height: 100),
               ],
             ),
           ),
@@ -381,21 +398,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: Icon(Icons.person_outline), label: 'My'),
           ],
         ),
-        floatingActionButton: FloatingActionButton(
-           heroTag: 'fab_create_club',
-          backgroundColor: _fabBg,
-          foregroundColor: _fabFg,
-          elevation: 4,
-          onPressed: () {
-            Navigator.pushNamed(
-              context,
-              '/createClub',
-              arguments: widget.userId,
-            );
-          },
-          child: const Icon(Icons.add, size: 28),
-        ),
-        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       ),
     );
   }
@@ -452,7 +454,6 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         
-        // 👇👇👇 'ToggleButtons'를 'DropdownButtonFormField'로 교체 👇👇👇
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
           child: DropdownButtonFormField<int>(
@@ -470,6 +471,11 @@ class _HomeScreenState extends State<HomeScreen> {
             // 3. 새로운 아이템이 선택되었을 때
             onChanged: (int? newId) {
       if (newId == null) return;
+      setState(() {
+               _selectedClubId = newId; // 1. ID 변경
+             });
+      
+      _fetchClubData(newId);
       
       // 1. 선택된 클럽 객체 찾기
       final selectedClub = _myClubs.firstWhere((club) => club.id == newId);
@@ -485,18 +491,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
       
-      // 참고: 드롭다운 값은 굳이 setState로 바꿀 필요가 없을 수도 있습니다.
-      // (갔다 오면 다시 원래대로 돌아와 있으므로)
+
     },
             
-            // --- 4. 요청하신 UI 스타일 적용 ---
+
             decoration: InputDecoration(
               filled: true,
-              fillColor: const Color(0xFF60A5FA), // 👈 요청하신 파란색 배경
-              // 30의 radius를 가진 둥근 테두리
+              fillColor: const Color(0xFF60A5FA), //
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(30),
-                borderSide: BorderSide.none, // 테두리 선 없음
+                borderSide: BorderSide.none, 
               ),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(30),
@@ -511,15 +515,14 @@ class _HomeScreenState extends State<HomeScreen> {
             
             // --- 5. 드롭다운 세부 스타일 ---
             style: const TextStyle(
-              color: Colors.white, // 👈 선택된 항목의 텍스트 색상 (흰색)
+              color: Colors.white,
               fontWeight: FontWeight.w600,
               fontSize: 16,
             ),
-            dropdownColor: _chipUnsel, // 👈 메뉴가 펼쳐졌을 때의 배경색
-            iconEnabledColor: Colors.white, // 👈 드롭다운 화살표 아이콘 색상
+            dropdownColor: _chipUnsel, // 
+            iconEnabledColor: Colors.white, // 
           ),
         ),
-        // 👆👆👆 여기까지 교체 👆👆👆
         
         // 나의 동호회 일정
         _buildScheduleSection(),
@@ -534,6 +537,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- 9-1. 나의 동호회 일정 (새로 추가) ---
   Widget _buildScheduleSection() {
+    if (_isClubDataLoading) return const SizedBox(); 
+    if (_schedules.isEmpty) {
+        return const Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text("예정된 일정이 없습니다.", style: TextStyle(color: Colors.white54)),
+        );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -575,9 +586,15 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          // 일정 카드 (스크린샷 기반 하드코딩)
-          // TODO: 이 부분을 _schedule 리스트 기반으로 ListView.builder로 변경
-          _buildScheduleCard(),
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(), // 스크롤 충돌 방지
+            itemCount: _schedules.length, // 리스트 개수만큼 반복
+            itemBuilder: (context, index) {
+              final schedule = _schedules[index]; // 리스트에서 하나 꺼내기
+              return _buildScheduleCard(schedule); // 👈 여기에 데이터를 넘겨줘야 에러가 안 납니다!
+            },
+          ),
         ],
       ),
     );
@@ -604,8 +621,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildScheduleCard() {
+  Widget _buildScheduleCard(Schedule schedule) {
+    String dateDisplay = schedule.startTime;
+    
+    try {
+      DateTime dt = DateTime.parse(schedule.startTime);
+      dateDisplay = DateFormat('M월 d일 a h:mm', 'ko_KR').format(dt);
+      
+    } catch(e) {
+      print("Date parsing error: $e");
+    }
+
     return Container(
+      margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF2F2F2F),
@@ -614,62 +642,48 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('9월 15일 오후 12:30', style: TextStyle(
-              color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 16),
+          Text(dateDisplay, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 12),
+          
+          // 매치(경기)인지 일반 일정인지 구분하여 표시
+          schedule.isMatch 
+          ? Row(
+              children: [
+                 const Text("우리팀", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                 const SizedBox(width: 8),
+                 const Text("VS", style: TextStyle(color: Color(0xFFB7F34D), fontWeight: FontWeight.bold, fontSize: 14)), 
+                 const SizedBox(width: 8),
+                 Text(schedule.opponentName ?? "상대팀", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              ],
+            )
+          : Text(schedule.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+
+          const SizedBox(height: 12),
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
-                children: [
-                  CircleAvatar(radius: 18, backgroundColor: Colors.orange), // TODO: 이미지
-                  SizedBox(width: 8),
-                  Text('익스플로전', style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const Text('VS', style: TextStyle(color: _textLime, fontSize: 16)),
-              const Row(
-                children: [
-                  Text('스플래쉬', style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-                  SizedBox(width: 8),
-                  CircleAvatar(radius: 18, backgroundColor: Colors.cyan), // TODO: 이미지
-                ],
-              ),
+               const Icon(Icons.location_on_outlined, color: Colors.white70, size: 16),
+               const SizedBox(width: 4),
+               Expanded(
+                 child: Text(schedule.location, style: const TextStyle(color: Colors.white70, fontSize: 13), overflow: TextOverflow.ellipsis),
+               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.location_on_outlined, color: Colors.white70, size: 16),
-                  SizedBox(width: 4),
-                  Text('정석항공과학고등학교 운동장', style: TextStyle(
-                      color: Colors.white70, fontSize: 13)),
-                ],
-              ),
-              ElevatedButton(
-                onPressed: () {},
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4B5563),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                ),
-                child: const Text('참가 신청', style: TextStyle(
-                    color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
+          )
         ],
       ),
     );
   }
-  
+
   // --- 9-2. 동호회 소식 (새로 추가) ---
   Widget _buildClubFeedSection() {
+    // 1. 데이터 로딩 중이거나 데이터가 없을 때 처리
+    if (_isClubDataLoading) return const SizedBox();
+    if (_posts.isEmpty) {
+       return const Padding(
+         padding: EdgeInsets.all(16.0),
+         child: Text("등록된 소식이 없습니다.", style: TextStyle(color: Colors.white54)),
+       );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
@@ -679,46 +693,65 @@ class _HomeScreenState extends State<HomeScreen> {
           const Text('동호회 소식', style: TextStyle(
               color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
-          // 소식 카드 (스크린샷 기반 하드코딩)
-          // TODO: 이 부분을 _feed 리스트 기반으로 ListView.builder로 변경
-          _buildFeedPostCard(),
+          
+          // 👇👇👇 [수정] ListView.builder로 변경 및 데이터 전달 👇👇👇
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _posts.length,
+            itemBuilder: (context, index) {
+              return _buildFeedPostCard(_posts[index]); // Argument 전달 해결!
+            },
+          ),
+          // 👆👆👆 ------------------------------------------- 👆👆👆
         ],
       ),
     );
   }
 
-  Widget _buildFeedPostCard() {
+  Widget _buildFeedPostCard(Post post) {
     return Column(
       children: [
         Row(
           children: [
-            const CircleAvatar(radius: 18, backgroundColor: Colors.purple), // TODO: 유저 이미지
+            // 프로필 이미지
+            CircleAvatar(
+              radius: 18, 
+              backgroundColor: Colors.grey[800],
+              // 👇 [수정] 모델의 변수명(profileImage) 사용
+              backgroundImage: post.profileImage != null ? NetworkImage(post.profileImage!) : null,
+              child: post.profileImage == null ? const Icon(Icons.person, color: Colors.white70, size: 20) : null,
+            ),
             const SizedBox(width: 8),
-            const Column(
+            Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('홍길동', style: TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold)),
-                Text('9월 9일 오후 11:43', style: TextStyle(
-                    color: Colors.white70, fontSize: 12)),
+                // 👇 [수정] userName -> authorName
+                Text(post.authorName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                // 👇 [수정] createdAt -> time
+                Text(post.time, style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
-            const Spacer(),
-            IconButton(onPressed: () {}, icon: const Icon(Icons.more_horiz, color: Colors.white70)),
           ],
         ),
         const SizedBox(height: 8),
-        const Text('안녕하세요\n이름: 홍길동\n나이: 23....', style: TextStyle(color: Colors.white)),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Text(post.content, style: const TextStyle(color: Colors.white), maxLines: 3, overflow: TextOverflow.ellipsis),
+        ),
         const SizedBox(height: 12),
         Row(
           children: [
             const Icon(Icons.favorite_border, color: Colors.white70, size: 20),
             const SizedBox(width: 4),
-            const Text('좋아요 1', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            // 👇 [수정] likeCount -> likes
+            Text('좋아요 ${post.likes}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            
             const SizedBox(width: 16),
             const Icon(Icons.chat_bubble_outline, color: Colors.white70, size: 20),
             const SizedBox(width: 4),
-            const Text('댓글 2', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            // 👇 [수정] 댓글 수도 표시 가능
+            Text('댓글 ${post.comments}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
           ],
         ),
         const Divider(color: Color(0xFF444444), height: 32),
@@ -728,7 +761,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // --- 공통 UI: 내 지역 추천 동호회 ---
   Widget _buildCategoryGrid() {
-    // (기존 코드와 동일)
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: GridView.count(
@@ -742,7 +774,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         final bool selected = _selectedCategory == label;
                         return GestureDetector(
                           onTap: () {
-              _fetchNearbyClubs(label); // 👈 setState 대신 이 함수를 호출
+              _fetchNearbyClubs(label);
             },
                           child: Container(
                             alignment: Alignment.center,
