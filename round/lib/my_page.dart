@@ -5,13 +5,14 @@ class MyPageScreen extends StatelessWidget {
   final String userId;
   const MyPageScreen({super.key, required this.userId});
 
+  // 공통 컬러
   static const Color _bg = Color(0xFF262626);
   static const Color _panel = Color(0xFF2F2F2F);
   static const Color _lime = Color(0xFFB7F34D);
   static const Color _iconActive = Colors.white;
   static const Color _iconInactive = Color(0xFF9CA3AF);
 
-  // ---------------- 하단 네비 ----------------
+  // ---------------- bottom nav ----------------
   void _onTapBottom(BuildContext context, int index) {
     if (index == 3) return; // 이미 마이페이지
     switch (index) {
@@ -25,14 +26,15 @@ class MyPageScreen extends StatelessWidget {
         Navigator.pushReplacementNamed(context, '/community', arguments: userId);
         break;
       case 3:
+      default:
         break;
     }
   }
 
-  // ---------------- 상단 프로필 카드 ----------------
-  Widget _profileCard() {
+  // ---------------- 프로필 카드 ----------------
+  Widget _profileCard(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _panel,
@@ -40,12 +42,14 @@ class MyPageScreen extends StatelessWidget {
       ),
       child: Row(
         children: [
+          // 아바타
           const CircleAvatar(
-            radius: 28,
+            radius: 24,
             backgroundColor: Color(0xFF4B5563),
-            child: Icon(Icons.person, color: Colors.white70, size: 30),
+            child: Icon(Icons.person, color: Colors.white, size: 28),
           ),
           const SizedBox(width: 14),
+          // 닉네임 + userId
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -54,53 +58,95 @@ class MyPageScreen extends StatelessWidget {
                   '게스트 닉네임',
                   style: TextStyle(
                     color: Colors.white,
-                    fontWeight: FontWeight.w700,
                     fontSize: 16,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   'User ID: $userId',
                   style: const TextStyle(
-                    color: Colors.white54,
+                    color: Colors.white70,
                     fontSize: 12,
                   ),
                 ),
               ],
             ),
           ),
-          ElevatedButton(
+          const SizedBox(width: 8),
+          // 프로필 편집 버튼
+          TextButton(
             onPressed: () {
               // TODO: 프로필 편집 화면으로 이동
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3B82F6),
-              foregroundColor: Colors.white,
+            style: TextButton.styleFrom(
+              backgroundColor: const Color(0xFF60A5FA),
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(999),
               ),
-              elevation: 0,
             ),
             child: const Text(
               '프로필 편집',
               style: TextStyle(
+                color: Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
-          ),
+          )
         ],
       ),
     );
   }
 
-  // ---------------- 내 활동 요약(2x2 카드) ----------------
-  Widget _activitySummary() {
+  // ---------------- 내 활동 요약 카드 ----------------
+  Widget _activitySummaryCard() {
+    // 더미 데이터 (나중에 실제 값으로 교체)
+    const totalGames = 165;
+    const myPosts = 12;
+    const myComments = 34;
+    const likedPosts = 48;
+
+    Widget _statItem(String label, String value, IconData icon) {
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF323232),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 18, color: Colors.white70),
+              const SizedBox(height: 8),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: _panel,
         borderRadius: BorderRadius.circular(16),
@@ -117,44 +163,34 @@ class MyPageScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          // 1줄: 총 경기 횟수 / 작성한 게시글
           Row(
             children: [
-              Expanded(
-                child: _statCard(
-                  icon: Icons.sports_esports, // 적당한 경기 아이콘
-                  value: '165',
-                  label: '총 경기 횟수',
-                ),
+              _statItem(
+                '총 경기 횟수',
+                '$totalGames',
+                Icons.flag_outlined,
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: _statCard(
-                  icon: Icons.article_outlined,
-                  value: '12',
-                  label: '작성한 게시글',
-                ),
+              _statItem(
+                '작성한 게시글',
+                '$myPosts',
+                Icons.article_outlined,
               ),
             ],
           ),
           const SizedBox(height: 10),
-          // 2줄: 작성한 댓글 / 좋아요한 글
           Row(
             children: [
-              Expanded(
-                child: _statCard(
-                  icon: Icons.chat_bubble_outline,
-                  value: '34',
-                  label: '작성한 댓글',
-                ),
+              _statItem(
+                '작성한 댓글',
+                '$myComments',
+                Icons.chat_bubble_outline,
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: _statCard(
-                  icon: Icons.favorite_border,
-                  value: '48',
-                  label: '좋아요한 글',
-                ),
+              _statItem(
+                '좋아요한 글',
+                '$likedPosts',
+                Icons.favorite_border,
               ),
             ],
           ),
@@ -163,269 +199,210 @@ class MyPageScreen extends StatelessWidget {
     );
   }
 
-  Widget _statCard({
-    required IconData icon,
-    required String value,
-    required String label,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFF383838),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: Colors.white70, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+  // ---------------- 활동 내역 카드 ----------------
+  Widget _activityHistoryCard() {
+    Widget _historyItem({
+      required IconData icon,
+      required String title,
+      required String meta,
+      required String badge,
+    }) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B3B3B),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: Colors.white70, size: 18),
             ),
-          )
-        ],
-      ),
-    );
-  }
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    meta,
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B3B3B),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                badge,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            )
+          ],
+        ),
+      );
+    }
 
-  // ---------------- 활동 내역 ----------------
-  Widget _activityHistory() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
       decoration: BoxDecoration(
         color: _panel,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 제목 + 전체 보기
+          // 타이틀 + 전체보기
           Row(
             children: [
-              const Text(
-                '활동 내역',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+              const Expanded(
+                child: Text(
+                  '활동 내역',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-              const Spacer(),
               TextButton(
                 onPressed: () {
                   // TODO: 전체 활동 내역 화면
                 },
                 style: TextButton.styleFrom(
-                  foregroundColor: Colors.white54,
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(0, 0),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 child: const Text(
                   '전체 보기',
-                  style: TextStyle(fontSize: 12),
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 6),
+          const Divider(color: Color(0xFF3F3F3F), height: 1),
+          const SizedBox(height: 4),
 
-          // 경기 기록
-          _activityRow(
-            icon: Icons.sports_soccer,
+          // 예시 2줄
+          _historyItem(
+            icon: Icons.sports_score_outlined,
             title: '9월 12일 동호회 매치',
-            subtitle: '익스플로전 vs 스플래쉬 · 2:0 승',
-            tag: '경기 기록',
+            meta: '익스플로전 VS 스플래쉬 · 2:0 승',
+            badge: '경기 기록',
           ),
-          // 리뷰
-          _activityRow(
+          _historyItem(
             icon: Icons.image_outlined,
             title: '볼링스테이션 리뷰 작성',
-            subtitle: '"레이인 상태 좋고, 만나 친절해요."',
-            tag: '리뷰',
+            meta: '"레이인 상태 좋고, 매너 진선해요."',
+            badge: '리뷰',
           ),
         ],
       ),
     );
   }
 
-  Widget _activityRow({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required String tag,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  // ---------------- 설정 섹션 ----------------
+  Widget _settingsSection() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+      decoration: BoxDecoration(
+        color: _panel,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
         children: [
-          Icon(icon, color: Colors.white60, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: const Color(0xFF3F3F3F),
-              borderRadius: BorderRadius.circular(20),
-            ),
+          const Align(
+            alignment: Alignment.centerLeft,
             child: Text(
-              tag,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
+              '설정',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  // ---------------- 클럽 관리 ----------------
-  Widget _clubManageSection() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 18, 16, 0),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      decoration: BoxDecoration(
-        color: _panel,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '클럽 관리',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
           const SizedBox(height: 8),
-          _settingsRow(
-            icon: Icons.list_alt_outlined,
-            label: '내 클럽 목록',
-            onTap: () {
-              // TODO: 내 클럽 목록
-            },
-          ),
-          _settingsRow(
-            icon: Icons.mail_outline,
-            label: '가입 신청 내역',
-            onTap: () {
-              // TODO: 가입 신청 내역
-            },
-          ),
-          _settingsRow(
-            icon: Icons.block_outlined,
-            label: '클럽 탈퇴 / 차단 관리',
-            onTap: () {
-              // TODO: 탈퇴/차단 관리
-            },
-          ),
-        ],
-      ),
-    );
-  }
+          const Divider(color: Color(0xFF3F3F3F), height: 1),
 
-  // ---------------- 설정 ----------------
-  Widget _settingsSection(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 18, 16, 24),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
-      decoration: BoxDecoration(
-        color: _panel,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '설정',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          _settingsRow(
+          // 기존 3개
+          _settingRow(
             icon: Icons.notifications_none,
             label: '알림 설정',
-            onTap: () {
-              // TODO: 알림 설정 화면
-            },
+            onTap: () {},
           ),
-          _settingsRow(
+          _settingRow(
             icon: Icons.lock_outline,
             label: '계정 · 보안',
-            onTap: () {
-              // TODO: 계정/보안 화면
-            },
+            onTap: () {},
           ),
-          _settingsRow(
+          _settingRow(
             icon: Icons.map_outlined,
             label: '활동 지역 / 등록 설정',
-            onTap: () {
-              // TODO: 활동 지역 설정
-            },
+            onTap: () {},
           ),
-          const Divider(
-            color: Colors.white10,
-            height: 16,
+
+          const Divider(color: Color(0xFF3F3F3F), height: 1),
+
+          // 새로 추가: 고객센터 / 자주묻는질문 / 공지사항 / 약관및정책
+          _settingRow(
+            icon: Icons.support_agent,
+            label: '고객센터',
+            onTap: () {},
           ),
-          _settingsRow(
+          _settingRow(
+            icon: Icons.help_outline,
+            label: '자주 묻는 질문',
+            onTap: () {},
+          ),
+          _settingRow(
+            icon: Icons.campaign_outlined,
+            label: '공지사항',
+            onTap: () {},
+          ),
+          _settingRow(
+            icon: Icons.description_outlined,
+            label: '약관 및 정책',
+            onTap: () {},
+          ),
+
+          const Divider(color: Color(0xFF3F3F3F), height: 1),
+
+          // 로그아웃
+          _settingRow(
             icon: Icons.logout,
             label: '로그아웃',
-            isDestructive: true,
+            labelColor: const Color(0xFFFF4D6A),
+            iconColor: const Color(0xFFFF4D6A),
             onTap: () {
               // TODO: 로그아웃 처리
             },
@@ -435,31 +412,33 @@ class MyPageScreen extends StatelessWidget {
     );
   }
 
-  Widget _settingsRow({
+  Widget _settingRow({
     required IconData icon,
     required String label,
+    Color? labelColor,
+    Color? iconColor,
     required VoidCallback onTap,
-    bool isDestructive = false,
   }) {
-    final color = isDestructive ? const Color(0xFFF97373) : Colors.white70;
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding:
+            const EdgeInsets.symmetric(vertical: 10.0),
         child: Row(
           children: [
-            Icon(icon, color: color, size: 18),
+            Icon(icon, color: iconColor ?? Colors.white70, size: 20),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
                 label,
                 style: TextStyle(
-                  color: color,
+                  color: labelColor ?? Colors.white,
                   fontSize: 13,
                 ),
               ),
             ),
-            Icon(Icons.chevron_right, color: color, size: 18),
+            const Icon(Icons.chevron_right,
+                color: Colors.white38, size: 18),
           ],
         ),
       ),
@@ -477,12 +456,12 @@ class MyPageScreen extends StatelessWidget {
       child: Scaffold(
         backgroundColor: _bg,
         body: SafeArea(
-          bottom: false,
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 8),
+                // 상단 Round 로고만
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
@@ -494,13 +473,10 @@ class MyPageScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                // (요청대로) '마이페이지' 서브타이틀 삭제
-                _profileCard(),
-                _activitySummary(),
-                _activityHistory(),
-                _clubManageSection(),
-                _settingsSection(context),
-                const SizedBox(height: 24),
+                _profileCard(context),
+                _activitySummaryCard(),
+                _activityHistoryCard(),
+                _settingsSection(),
               ],
             ),
           ),
