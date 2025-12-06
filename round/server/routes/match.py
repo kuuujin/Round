@@ -366,3 +366,233 @@ def update_match_schedule():
         return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if conn: conn.close()
+
+@match_bp.route("/api/match/result/propose", methods=["POST"])
+def propose_match_result():
+    conn = None
+    try:
+        data = request.get_json()
+        match_id_str = data.get('match_id')
+        user_id_str = session.get('user_id') # 입력한 사람
+        score_my = int(data.get('score_my')) # 우리팀 점수
+        score_op = int(data.get('score_op')) # 상대팀 점수
+
+        # ID 파싱 (match_1_9) -> club_a=1, club_b=9
+        ids = match_id_str.replace("match_", "").split("_")
+        club_a_id = int(ids[0])
+        club_b_id = int(ids[1])
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 입력한 사람이 A팀인지 B팀인지 확인
+        cursor.execute("SELECT id FROM Users WHERE user_id = %s", (user_id_str,))
+        proposer_db_id = cursor.fetchone()['id']
+
+        # 내가 속한 클럽 찾기
+        cursor.execute("SELECT club_id FROM ClubMembers WHERE user_id = %s AND club_id IN (%s, %s)", (proposer_db_id, club_a_id, club_b_id))
+        my_club_row = cursor.fetchone()
+        
+        if not my_club_row:
+            return jsonify({"success": False, "error": "권한이 없습니다."}), 403
+            
+        my_club_id = my_club_row['club_id']
+
+        # DB에 저장할 때는 항상 club_a, club_b 순서로 매핑
+        # 내가 A팀이면 (내점수, 상대점수), 내가 B팀이면 (상대점수, 내점수)
+        final_score_a = score_my if my_club_id == club_a_id else score_op
+        final_score_b = score_op if my_club_id == club_a_id else score_my
+
+        # 상태를 PENDING으로 변경하고 점수 기록
+        sql = """
+            UPDATE MatchQueue 
+            SET status = 'PENDING', score_a = %s, score_b = %s, proposer_id = %s
+            WHERE (club_id = %s AND matched_club_id = %s) 
+               OR (club_id = %s AND matched_club_id = %s)
+        """
+        cursor.execute(sql, (final_score_a, final_score_b, proposer_db_id, club_a_id, club_b_id, club_b_id, club_a_id))
+        conn.commit()
+
+        # (선택) 상대방에게 "결과 확인 요청" 알림 발송 (FCM/Socket)
+        # ...
+
+        return jsonify({"success": True, "message": "결과 승인 요청을 보냈습니다."}), 200
+
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"Error proposing: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@match_bp.route("/api/match/result/confirm", methods=["POST"])
+def confirm_match_result():
+    conn = None
+    try:
+        data = request.get_json()
+        match_id_str = data.get('match_id')
+        is_accepted = data.get('accept') # True/False
+
+        ids = match_id_str.replace("match_", "").split("_")
+        club_a_id = int(ids[0])
+        club_b_id = int(ids[1])
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        if not is_accepted:
+            # 거절 시: 상태를 다시 MATCHED로 돌리고 점수 초기화
+            sql = """UPDATE MatchQueue SET status = 'MATCHED', score_a = NULL, score_b = NULL, proposer_id = NULL
+                     WHERE (club_id=%s AND matched_club_id=%s) OR (club_id=%s AND matched_club_id=%s)"""
+            cursor.execute(sql, (club_a_id, club_b_id, club_b_id, club_a_id))
+            conn.commit()
+            return jsonify({"success": True, "message": "결과 입력을 거절했습니다."}), 200
+
+        # --- 승인 시 ELO 계산 로직 ---
+        
+        # 1. 저장된 점수 가져오기
+        cursor.execute("""
+            SELECT score_a, score_b FROM MatchQueue 
+            WHERE (club_id=%s AND matched_club_id=%s) LIMIT 1
+        """, (club_a_id, club_b_id))
+        match_record = cursor.fetchone()
+        score_a = match_record['score_a']
+        score_b = match_record['score_b']
+
+        # 2. 클럽 현재 포인트 조회
+        cursor.execute("SELECT id, point FROM Clubs WHERE id IN (%s, %s)", (club_a_id, club_b_id))
+        clubs = {row['id']: row for row in cursor.fetchall()}
+        
+        # 3. 승패 판정 (A팀 기준)
+        result_score = 0.5 # 무승부
+        if score_a > score_b: result_score = 1.0 # A승
+        elif score_a < score_b: result_score = 0.0 # A패
+
+        # 4. ELO 계산 (이전 함수 활용)
+        # from app import calculate_new_ratings (함수 import 필요)
+        new_pt_a, new_pt_b = calculate_new_ratings(clubs[club_a_id]['point'], clubs[club_b_id]['point'], result_score)
+
+        # 5. DB 업데이트 (Clubs 점수 반영 + MatchQueue 상태 FINISHED)
+        conn.start_transaction()
+        
+        # Clubs 업데이트
+        cursor.execute("UPDATE Clubs SET point = %s, wins = wins + %s, losses = losses + %s, draws = draws + %s WHERE id = %s", 
+                       (new_pt_a, 1 if result_score==1 else 0, 1 if result_score==0 else 0, 1 if result_score==0.5 else 0, club_a_id))
+        cursor.execute("UPDATE Clubs SET point = %s, wins = wins + %s, losses = losses + %s, draws = draws + %s WHERE id = %s", 
+                       (new_pt_b, 1 if result_score==0 else 0, 1 if result_score==1 else 0, 1 if result_score==0.5 else 0, club_b_id))
+
+        # MatchQueue 완료 처리
+        cursor.execute("""
+            UPDATE MatchQueue SET status = 'FINISHED' 
+            WHERE (club_id=%s AND matched_club_id=%s) OR (club_id=%s AND matched_club_id=%s)
+        """, (club_a_id, club_b_id, club_b_id, club_a_id))
+
+        conn.commit()
+        
+        # 알림 발송 로직 (생략)
+
+        return jsonify({"success": True, "message": "경기 결과가 확정되었습니다!"}), 200
+
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"Error confirm: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+@match_bp.route("/api/match/detail", methods=["GET"])
+def get_match_detail():
+    db_connection = None
+    cursor = None
+    try:
+        # 1. 로그인 확인
+        if 'user_id' not in session:
+             return jsonify({"success": False, "error": "로그인 필요"}), 401
+        
+        user_id_str = session['user_id']
+        match_id_str = request.args.get('match_id')
+        
+        if not match_id_str:
+             return jsonify({"success": False, "error": "match_id 필요"}), 400
+
+        # ID 파싱
+        ids = match_id_str.replace("match_", "").split("_")
+        club_a_id = int(ids[0])
+        club_b_id = int(ids[1])
+
+        db_connection = get_db_connection()
+        cursor = db_connection.cursor(dictionary=True)
+
+        # 2. 내 DB ID(숫자) 및 내가 속한 클럽 확인
+        #    (이 매치에 참여한 두 클럽 중 내가 어디 속해있는지 확인)
+        cursor.execute("""
+            SELECT U.id as user_db_id, CM.club_id 
+            FROM Users U
+            JOIN ClubMembers CM ON U.id = CM.user_id
+            WHERE U.user_id = %s AND CM.club_id IN (%s, %s)
+        """, (user_id_str, club_a_id, club_b_id))
+        
+        user_info = cursor.fetchone()
+        
+        if not user_info:
+            # 이 경기에 참여하지 않은 제3자가 조회를 시도한 경우
+            return jsonify({"success": False, "error": "권한이 없습니다."}), 403
+
+        my_db_id = user_info['user_db_id']
+        my_club_id = user_info['club_id']
+
+        # 3. 매칭 정보 조회
+        sql = """
+            SELECT status, score_a, score_b, proposer_id
+            FROM MatchQueue 
+            WHERE (club_id=%s AND matched_club_id=%s) OR (club_id=%s AND matched_club_id=%s)
+            LIMIT 1
+        """
+        cursor.execute(sql, (club_a_id, club_b_id, club_b_id, club_a_id))
+        match_info = cursor.fetchone()
+        
+        if not match_info:
+            return jsonify({"success": False, "error": "Match not found"}), 404
+
+        # 4. 데이터 가공 (내 기준)
+        response_data = {
+            "status": match_info['status'],
+            "is_proposer": False,
+            "my_score": 0,
+            "op_score": 0
+        }
+
+        # 내가 제안자인지 확인
+        if match_info['proposer_id'] == my_db_id:
+            response_data['is_proposer'] = True
+
+        # 점수 매핑 (내가 A팀이면 score_a가 내 점수)
+        # MatchQueue에 저장될 때 club_id가 A팀, matched_club_id가 B팀임
+        # 그런데 우리는 club_a_id, club_b_id를 ID 크기순으로 정렬해서 match_id를 만들었으므로
+        # DB에 저장된 순서(신청자/수락자)와 match_id 순서가 다를 수 있음.
+        
+        # 정확성을 위해 쿼리를 다시 확인하거나, DB의 club_id 컬럼을 기준으로 판단
+        # 여기서는 간단히 '내 클럽 ID'가 club_a_id(매칭 신청자)인지 확인
+        # 주의: DB 쿼리에서 club_id는 '신청자', matched_club_id는 '수락자'
+        
+        # DB 로우 다시 조회 (누가 A(신청자)인지 확인용)
+        cursor.execute("SELECT club_id FROM MatchQueue WHERE (club_id=%s AND matched_club_id=%s) OR (club_id=%s AND matched_club_id=%s)", (club_a_id, club_b_id, club_b_id, club_a_id))
+        row = cursor.fetchone()
+        db_club_a = row['club_id'] # DB상의 A팀(신청자)
+        
+        if my_club_id == db_club_a:
+            response_data['my_score'] = match_info['score_a']
+            response_data['op_score'] = match_info['score_b']
+        else:
+            response_data['my_score'] = match_info['score_b']
+            response_data['op_score'] = match_info['score_a']
+
+        return jsonify({"success": True, "info": response_data}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Match Detail Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if cursor: cursor.close()
+        if db_connection and db_connection.is_connected():
+            db_connection.close()
