@@ -7,7 +7,7 @@ import 'club_schedule.dart';
 import 'club_home.dart';
 
 class ClubMainScreen extends StatefulWidget {
-  final MyClub club; // 선택된 동호회 정보 (ID, 이름)
+  final MyClub club; // 선택된 동호회 객체
   final String userId;
 
   const ClubMainScreen({
@@ -21,28 +21,30 @@ class ClubMainScreen extends StatefulWidget {
 }
 
 class _ClubMainScreenState extends State<ClubMainScreen> {
-  int _currentIndex = 0;
+  // Palette
   static const Color _bg = Color(0xFF262626);
   static const Color _lime = Color(0xFFB7F34D);
   static const Color _iconActive = Colors.white;
   static const Color _iconInactive = Color(0xFF9CA3AF);
 
+  int _currentIndex = 0;
   late List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
-    // 각 페이지에 clubId를 주입하여 생성
+    // 탭별 화면 초기화 (clubId 전달)
     _pages = [
+      // 0: 홈 (전적, 배너, 매칭 등)
       ClubHomeScreen(clubId: widget.club.id, userId: widget.userId),
       
-      // 1: 일정
+      // 1: 일정 (캘린더)
       ClubScheduleScreen(clubId: widget.club.id, userId: widget.userId),
 
-      // 2: 게시판
+      // 2: 게시판 (글 목록)
       ClubBoardScreen(clubId: widget.club.id, userId: widget.userId),
 
-      // 3: 클럽 정보
+      // 3: 정보 (멤버 목록, 소개)
       ClubMembersScreen(clubId: widget.club.id, userId: widget.userId),
     ];
   }
@@ -55,6 +57,7 @@ class _ClubMainScreenState extends State<ClubMainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 시스템 UI 스타일 설정 (상단바 색상 등)
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light.copyWith(
         statusBarColor: _bg,
@@ -62,29 +65,34 @@ class _ClubMainScreenState extends State<ClubMainScreen> {
       ),
       child: Scaffold(
         backgroundColor: _bg,
+        
+        // 상단 앱바 (동호회 이름)
         appBar: AppBar(
           backgroundColor: _bg,
           elevation: 0,
+          centerTitle: true,
           iconTheme: const IconThemeData(color: Colors.white),
           title: Text(
-            widget.club.name, // 상단에 동호회 이름 표시
+            widget.club.name,
             style: const TextStyle(color: _lime, fontWeight: FontWeight.w700),
           ),
-          centerTitle: true,
         ),
-        // IndexedStack을 사용하면 탭 전환 시 상태(스크롤 위치 등)가 유지됩니다.
+
+        // 본문 (IndexedStack으로 탭 상태 유지)
         body: IndexedStack(
           index: _currentIndex,
           children: _pages,
         ),
+
+        // 하단 탭바
         bottomNavigationBar: BottomNavigationBar(
           type: BottomNavigationBarType.fixed,
           backgroundColor: _bg,
           currentIndex: _currentIndex,
           selectedItemColor: _iconActive,
           unselectedItemColor: _iconInactive,
-          showSelectedLabels: true,
-          showUnselectedLabels: true,
+          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          unselectedLabelStyle: const TextStyle(fontSize: 12),
           onTap: _onTapBottom,
           items: const [
             BottomNavigationBarItem(icon: Icon(Icons.home_filled), label: '홈'),

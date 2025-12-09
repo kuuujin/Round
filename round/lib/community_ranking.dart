@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
-import 'package:round/location_search_screen.dart'; // Ensure this import is correct
-import 'package:round/models/club_models.dart'; // Ensure ClubRank is here
+import 'package:round/location_search_screen.dart';
+import 'package:round/models/club_models.dart';
 
 class CommunityRankingTab extends StatefulWidget {
   final String userId;
@@ -17,6 +17,7 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
   static const Color _lime = Color(0xFFB7F34D);
   static const Color _panel = Color(0xFF2F2F2F);
   static const Color _chipSel = Color(0xFF60A5FA);
+  static const Color _bg = Color(0xFF262626); // 배경색 명시
 
   final Dio dio = ApiClient().dio;
 
@@ -45,21 +46,26 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
         'sigungu': _sigungu,
       });
       final List<dynamic> data = response.data['ranking'];
-      setState(() {
-        _rankingList = data.map((e) => ClubRank.fromJson(e)).toList();
-        _isLoading = false;
-      });
+      
+      if (mounted) {
+        setState(() {
+          _rankingList = data.map((e) => ClubRank.fromJson(e)).toList();
+          _isLoading = false;
+        });
+      }
     } on DioException catch (e) {
-      print("랭킹 로딩 실패: $e");
-      setState(() => _isLoading = false);
+      debugPrint("랭킹 로딩 실패: ${e.message}");
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _pickLocation() async {
-    final result = await Navigator.push<LocationData>(
+    // LocationSearchScreen이 LocationData(sido, sigungu)를 반환한다고 가정
+    final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const LocationSearchScreen()),
     );
+    
     if (result != null) {
       setState(() {
         _sido = result.sido;
@@ -75,7 +81,7 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
 
   @override
   Widget build(BuildContext context) {
-    // Separate Top 3 and Others
+    // Top 3 분리 로직
     List<ClubRank> top3 = [];
     List<ClubRank> others = [];
     if (_rankingList.isNotEmpty) {
@@ -85,93 +91,119 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
       }
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 20),
+    return Scaffold( // Scaffold 추가하여 배경색 등 제어
+      backgroundColor: Colors.transparent, // 상위 탭 배경 사용
+      body: RefreshIndicator(
+        color: _lime,
+        backgroundColor: _panel,
+        onRefresh: _fetchRanking,
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          children: [
+            // 1. 위치 선택기
+            _buildLocationHeader(),
+            const SizedBox(height: 16),
 
-        // Location Selector
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: GestureDetector(
-            onTap: _pickLocation,
-            child: Row(
-              children: [
-                Text("$_sido $_sigungu", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(width: 4),
-                const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 28),
-              ],
+            // 2. 종목 선택 칩
+            _buildSportChips(),
+            const SizedBox(height: 24),
+
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Text("Rank", style: TextStyle(color: _lime, fontSize: 20, fontWeight: FontWeight.bold)),
             ),
-          ),
-        ),
-        
-        const SizedBox(height: 16),
+            const SizedBox(height: 10),
 
-        // Sport Chips
-        SizedBox(
-          height: 40,
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            scrollDirection: Axis.horizontal,
-            itemCount: _sports.length,
-            separatorBuilder: (c, i) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
-              final sport = _sports[index];
-              final isSelected = _selectedSport == sport;
-              return GestureDetector(
-                onTap: () {
-                  setState(() => _selectedSport = sport);
-                  _fetchRanking(); 
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: isSelected ? _chipSel : Colors.transparent,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: isSelected ? _chipSel : Colors.white),
-                  ),
-                  child: Text(sport, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+            // 3. 랭킹 리스트 영역
+            if (_isLoading)
+              const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: _lime)))
+            else if (_rankingList.isEmpty)
+              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("랭킹 정보가 없습니다.", style: TextStyle(color: Colors.white38))))
+            else ...[
+              // Top 3 카드
+              if (top3.isNotEmpty) 
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _buildTop3Card(top3),
                 ),
-              );
+              
+              const SizedBox(height: 16),
+              
+              // 나머지 리스트
+              ...others.map((club) => Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: _buildRankItem(club),
+              )),
+              
+              const SizedBox(height: 80), 
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Widgets ---
+
+  Widget _buildLocationHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GestureDetector(
+        onTap: _pickLocation,
+        child: Row(
+          mainAxisSize: MainAxisSize.min, // 터치 영역 최적화
+          children: [
+            Text("$_sido $_sigungu", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(width: 4),
+            const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 28),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSportChips() {
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        scrollDirection: Axis.horizontal,
+        itemCount: _sports.length,
+        separatorBuilder: (c, i) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final sport = _sports[index];
+          final isSelected = _selectedSport == sport;
+          return GestureDetector(
+            onTap: () {
+              if (_selectedSport != sport) {
+                setState(() => _selectedSport = sport);
+                _fetchRanking();
+              }
             },
-          ),
-        ),
-
-        const SizedBox(height: 24),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16),
-          child: Text("Rank", style: TextStyle(color: _lime, fontSize: 20, fontWeight: FontWeight.bold)),
-        ),
-        const SizedBox(height: 10),
-
-        // Ranking List
-        Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator(color: _lime))
-              : _rankingList.isEmpty
-                  ? const Center(child: Text("랭킹 정보가 없습니다.", style: TextStyle(color: Colors.white38)))
-                  : ListView(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                      children: [
-                        if (top3.isNotEmpty) _buildTop3Card(top3),
-                        
-                        const SizedBox(height: 16),
-                        
-                        ...others.map((club) => _buildRankItem(club)),
-                        
-                        const SizedBox(height: 80), 
-                      ],
-                    ),
-        ),
-      ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: isSelected ? _chipSel : Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: isSelected ? _chipSel : Colors.white54),
+              ),
+              child: Text(
+                sport, 
+                style: TextStyle(color: isSelected ? Colors.white : Colors.white70, fontWeight: FontWeight.w600)
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
   Widget _buildTop3Card(List<ClubRank> top3) {
+    // 2등, 1등, 3등 순서로 배치
     List<ClubRank?> podium = [
       top3.length > 1 ? top3[1] : null, 
-      top3[0],                          
+      top3[0],                               
       top3.length > 2 ? top3[2] : null, 
     ];
 
@@ -183,7 +215,7 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        crossAxisAlignment: CrossAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.end, // 바닥 정렬
         children: [
           if (podium[0] != null) _buildPodiumItem(podium[0]!, 2),
           _buildPodiumItem(podium[1]!, 1),
@@ -195,28 +227,23 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
 
   Widget _buildPodiumItem(ClubRank club, int rank) {
     final double size = rank == 1 ? 80 : 60;
-    final Color crownColor = rank == 1 ? Colors.amber : (rank == 2 ? Colors.grey : Colors.brown);
+    final Color crownColor = rank == 1 ? Colors.amber : (rank == 2 ? const Color(0xFFC0C0C0) : const Color(0xFFCD7F32));
     
     return Column(
       children: [
         Icon(Icons.emoji_events, color: crownColor, size: 30),
         const SizedBox(height: 4),
-        Container(
-          width: size, height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            border: Border.all(color: crownColor, width: 2),
-            color: Colors.grey[800],
-            image: (club.imageUrl.isNotEmpty && !club.imageUrl.contains('placeholder'))
-                ? DecorationImage(image: NetworkImage(club.imageUrl), fit: BoxFit.cover)
-                : null,
-          ),
-          child: (club.imageUrl.isEmpty || club.imageUrl.contains('placeholder'))
-              ? Center(child: Text(club.name.isNotEmpty ? club.name[0] : "?", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))
-              : null,
-        ),
+        _buildClubAvatar(club.imageUrl, club.name, size, crownColor),
         const SizedBox(height: 8),
-        Text(club.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        SizedBox(
+          width: 80,
+          child: Text(
+            club.name, 
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)
+          ),
+        ),
         Text(_formatNumber(club.point), style: const TextStyle(color: _lime, fontWeight: FontWeight.bold)),
       ],
     );
@@ -234,28 +261,46 @@ class _CommunityRankingTabState extends State<CommunityRankingTab> {
         children: [
           SizedBox(
             width: 30,
-            child: Text("${club.ranking}", style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
-          Container(
-            width: 40, height: 40,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.grey[800],
-              image: (club.imageUrl.isNotEmpty && !club.imageUrl.contains('placeholder'))
-                  ? DecorationImage(image: NetworkImage(club.imageUrl), fit: BoxFit.cover)
-                  : null,
+            child: Text(
+              "${club.ranking}", 
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)
             ),
-             child: (club.imageUrl.isEmpty || club.imageUrl.contains('placeholder'))
-              ? Center(child: Text(club.name.isNotEmpty ? club.name[0] : "?", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))
-              : null,
           ),
+          _buildClubAvatar(club.imageUrl, club.name, 40, null),
           const SizedBox(width: 12),
           Expanded(
             child: Text(club.name, style: const TextStyle(color: Colors.white, fontSize: 16)),
           ),
-          Text(_formatNumber(club.point), style: const TextStyle(color: _lime, fontSize: 16, fontWeight: FontWeight.bold)),
+          Text(
+            _formatNumber(club.point), 
+            style: const TextStyle(color: _lime, fontSize: 16, fontWeight: FontWeight.bold)
+          ),
         ],
       ),
+    );
+  }
+
+  //  - 공통 아바타 위젯
+  Widget _buildClubAvatar(String? imageUrl, String name, double size, Color? borderColor) {
+    final bool hasImage = imageUrl != null && imageUrl.isNotEmpty && !imageUrl.contains('placeholder');
+    
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: borderColor != null ? Border.all(color: borderColor, width: 2) : null,
+        color: Colors.grey[800],
+        image: hasImage ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover) : null,
+      ),
+      child: !hasImage
+          ? Center(
+              child: Text(
+                name.isNotEmpty ? name[0] : "?", 
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: size * 0.4)
+              ),
+            )
+          : null,
     );
   }
 }

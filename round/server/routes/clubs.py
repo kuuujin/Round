@@ -3,17 +3,20 @@ import mysql.connector
 import os
 from google.cloud import storage
 from werkzeug.utils import secure_filename
-from utils.db import get_db_connection # Use the DB utility
+from utils.db import get_db_connection
 
-# Create the Blueprint
 clubs_bp = Blueprint('clubs', __name__)
+
+# ==========================================
+# 1. 동호회 생성 및 관리 (Create & Manage)
+# ==========================================
 
 @clubs_bp.route("/create-club", methods=["POST"])
 def create_club():
-    db_connection = None
+    conn = None
     cursor = None
     try:
-        # 1. Get form data
+        # 1. Form 데이터 수신
         creator_user_id_str = request.form.get('creator_user_id')
         sport = request.form.get('sport')
         sido = request.form.get('sido')
@@ -24,7 +27,7 @@ def create_club():
         club_image = request.files.get('club_image')
         image_url = None
 
-        # 2. Upload to GCS
+        # 2. GCS 이미지 업로드
         if club_image:
             filename = secure_filename(club_image.filename)
             storage_client = storage.Client()
@@ -37,13 +40,12 @@ def create_club():
                 content_type=club_image.content_type
             )
             image_url = blob.public_url
-            current_app.logger.info(f"Club image uploaded to GCS: {image_url}")
 
-        # 3. DB Connection
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor()
+        # 3. DB 연결
+        conn = get_db_connection()
+        cursor = conn.cursor()
 
-        # 4. Get Creator ID
+        # 4. 생성자 ID 조회
         cursor.execute("SELECT id FROM Users WHERE user_id = %s", (creator_user_id_str,))
         user_record = cursor.fetchone()
         if not user_record:
@@ -51,7 +53,7 @@ def create_club():
         
         creator_id_int = user_record[0]
 
-        # 5. Insert Club
+        # 5. Clubs 테이블 Insert
         sql_club = """INSERT INTO Clubs (name, sport, sido, sigungu, description, max_capacity, club_image_url, creator_id)
                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
         val_club = (name, sport, sido, sigungu, description, max_capacity, image_url, creator_id_int)
@@ -59,38 +61,36 @@ def create_club():
         
         new_club_id = cursor.lastrowid
 
-        # 6. Insert Admin Member
+        # 6. 생성자를 관리자(admin)로 멤버 추가
         sql_member = """INSERT INTO ClubMembers (user_id, club_id, role)
                         VALUES (%s, %s, 'admin')"""
         val_member = (creator_id_int, new_club_id)
         cursor.execute(sql_member, val_member)
         
-        db_connection.commit()
+        conn.commit()
 
-        current_app.logger.info(f"New club created (ID: {new_club_id}) by user (ID: {creator_id_int}).")
+        current_app.logger.info(f"Club created: {name} (ID: {new_club_id})")
         return jsonify({"success": True, "message": "동호회가 성공적으로 생성되었습니다!"}), 201
 
     except mysql.connector.Error as e:
-        if db_connection: db_connection.rollback()
-        if e.errno == 1062:
-            current_app.logger.error(f"Club creation failed (Duplicate name): {e}")
+        if conn: conn.rollback()
+        if e.errno == 1062: # Duplicate entry
             return jsonify({"success": False, "error": "이미 사용 중인 동호회 이름입니다."}), 409
         else:
             current_app.logger.error(f"DB Error (create-club): {e}")
             return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
     except Exception as e:
-        if db_connection: db_connection.rollback()
-        current_app.logger.error(f"Server Error (create-club): {e}", exc_info=True)
+        if conn: conn.rollback()
+        current_app.logger.error(f"Server Error (create-club): {e}")
         return jsonify({"success": False, "error": "서버 오류"}), 500
     finally:
         if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
-            current_app.logger.debug("MySQL connection is closed for create-club request")
+        if conn and conn.is_connected(): conn.close()
+
 
 @clubs_bp.route("/api/my-clubs", methods=["GET"])
 def get_my_clubs():
-    db_connection = None
+    conn = None
     cursor = None
     try:
         if 'user_id' not in session:
@@ -98,41 +98,85 @@ def get_my_clubs():
 
         current_user_id_str = session['user_id']
 
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor(dictionary=True)
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
+        # 내가 가입한 클럽 목록 및 내 역할(role) 조회
         sql = """
-            SELECT C.id, C.name
+            SELECT C.id, C.name, C.sport, C.sido, C.sigungu, CM.role 
             FROM Clubs C
             JOIN ClubMembers CM ON C.id = CM.club_id
-            JOIN Users U ON CM.user_id = U.id
-            WHERE U.user_id = %s
+            WHERE CM.user_id = (SELECT id FROM Users WHERE user_id = %s)
         """
         cursor.execute(sql, (current_user_id_str,))
         clubs = cursor.fetchall()
 
         return jsonify({"success": True, "clubs": clubs}), 200
 
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (get_my_clubs): {e}")
+    except Exception as e:
+        current_app.logger.error(f"Error (get_my_clubs): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn and conn.is_connected(): conn.close()
+
+
+# ==========================================
+# 2. 동호회 조회 및 정보 (Search & Info)
+# ==========================================
+
+@clubs_bp.route("/api/clubs/list", methods=["GET"])
+def get_clubs_list():
+    conn = None
+    cursor = None
+    try:
+        sido = request.args.get('sido')
+        sport = request.args.get('sport')
+        keyword = request.args.get('keyword')
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        sql = """
+            SELECT 
+                C.id, C.name, C.description, C.sport, C.sido, C.sigungu, C.club_image_url,
+                C.max_capacity,
+                (SELECT COUNT(*) FROM ClubMembers CM WHERE CM.club_id = C.id) AS member_count
+            FROM Clubs C
+            WHERE C.sido = %s AND C.sport = %s
+        """
+        params = [sido, sport]
+
+        if keyword:
+            sql += " AND C.name LIKE %s"
+            params.append(f"%{keyword}%")
+
+        sql += " ORDER BY C.created_at DESC"
+
+        cursor.execute(sql, tuple(params))
+        clubs = cursor.fetchall()
+
+        return jsonify({"success": True, "clubs": clubs}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error (get_clubs_list): {e}")
         return jsonify({"success": False, "error": "DB 오류"}), 500
     finally:
         if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
+        if conn and conn.is_connected(): conn.close()
 
 
 @clubs_bp.route("/api/recommended-clubs", methods=["GET"])
 def get_recommended_clubs():
-    db_connection = None
+    conn = None
     cursor = None
     try:
         category = request.args.get('category')
         sido = request.args.get('sido')
         sigungu = request.args.get('sigungu')
 
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor(dictionary=True)
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
         sql_select = """
             SELECT 
@@ -147,12 +191,12 @@ def get_recommended_clubs():
             sql_where_clauses.append("C.sport = %s")
             params.append(category)
 
-        if sido and sigungu:
-            sql_where_clauses.append("C.sido = %s AND C.sigungu = %s")
-            params.extend([sido, sigungu])
-        elif sido:
+        if sido:
             sql_where_clauses.append("C.sido = %s")
             params.append(sido)
+            if sigungu:
+                sql_where_clauses.append("C.sigungu = %s")
+                params.append(sigungu)
             
         if sql_where_clauses:
             sql_where = " WHERE " + " AND ".join(sql_where_clauses)
@@ -161,33 +205,38 @@ def get_recommended_clubs():
             
         sql_order = " ORDER BY RAND() LIMIT 10"
         
-        final_sql = sql_select + sql_where + sql_order
-        
-        cursor.execute(final_sql, tuple(params))
+        cursor.execute(sql_select + sql_where + sql_order, tuple(params))
         clubs = cursor.fetchall()
 
         return jsonify({"success": True, "clubs": clubs}), 200
 
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (get_recommended_clubs): {e}")
-        return jsonify({"success": False, "error": "DB 오류"}), 500
+    except Exception as e:
+        current_app.logger.error(f"Error (get_recommended_clubs): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
+        if conn and conn.is_connected(): conn.close()
+
 
 @clubs_bp.route("/api/club-info", methods=["GET"])
 def get_club_info():
-    db_connection = None
+    conn = None
     cursor = None
     try:
+        conn = get_db_connection()
+        if conn is None:
+            return jsonify({"success": False, "error": "Database connection failed"}), 500
+        
+        # 다중 쿼리 실행 시 안전을 위해 buffered=True 사용
+        cursor = conn.cursor(dictionary=True, buffered=True)
+
         club_id = request.args.get('club_id')
+        user_id_str = session.get('user_id')
+
         if not club_id:
-            return jsonify({"success": False, "error": "club_id 필요"}), 400
+             return jsonify({"success": False, "error": "Club ID is required"}), 400
 
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor(dictionary=True)
-
+        # 1. 클럽 기본 정보 조회
         sql = """
             SELECT 
                 id, name, sport, sido, sigungu, description, max_capacity, club_image_url,
@@ -202,57 +251,122 @@ def get_club_info():
         if not club:
             return jsonify({"success": False, "error": "존재하지 않는 동호회"}), 404
 
-        # Calculate Rank
+        # 2. 내 권한 조회 (MEMBER / ADMIN / PENDING / NONE)
+        my_role = "NONE"
+        if user_id_str:
+            # (1) 이미 멤버인지 확인
+            cursor.execute("""
+                SELECT role FROM ClubMembers 
+                WHERE club_id = %s 
+                  AND user_id = (SELECT id FROM Users WHERE user_id = %s)
+            """, (club_id, user_id_str))
+            member_row = cursor.fetchone()
+            
+            if member_row:
+                my_role = member_row['role']
+            else:
+                # (2) 가입 신청 대기 중인지 확인 (테이블 없을 경우 대비 try-except)
+                try:
+                    cursor.execute("""
+                        SELECT id FROM ClubJoinRequests 
+                        WHERE club_id = %s 
+                          AND user_id = (SELECT id FROM Users WHERE user_id = %s)
+                    """, (club_id, user_id_str))
+                    if cursor.fetchone():
+                        my_role = "PENDING"
+                except Exception:
+                    pass # 테이블이 없으면 무시
+
+        # 3. 랭킹 계산 (동일 지역, 동일 종목 내 순위)
         sql_rank = """
             SELECT COUNT(*) + 1 AS ranking
             FROM Clubs
-            WHERE sido = %s 
-              AND sigungu = %s 
-              AND sport = %s 
-              AND point > %s
+            WHERE sido = %s AND sigungu = %s AND sport = %s AND point > %s
         """
-        rank_params = (club['sido'], club['sigungu'], club['sport'], club['point'])
-        
-        cursor.execute(sql_rank, rank_params)
+        cursor.execute(sql_rank, (club['sido'], club['sigungu'], club['sport'], club['point']))
         rank_result = cursor.fetchone()
         
-        current_rank = rank_result['ranking']
-        
-        club['rank_text'] = f"Rank #{current_rank}"
+        club['rank_text'] = f"Rank #{rank_result['ranking']}"
         club['total_matches'] = club['wins'] + club['draws'] + club['losses']
+        club['my_role'] = my_role
 
         return jsonify({"success": True, "club": club}), 200
 
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (get_club_info): {e}")
-        return jsonify({"success": False, "error": "DB 오류"}), 500
+    except Exception as e:
+        current_app.logger.error(f"Error (get_club_info): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
         if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
+        if conn and conn.is_connected(): conn.close()
+
+
+@clubs_bp.route("/api/ranking", methods=["GET"])
+def get_club_ranking():
+    conn = None
+    try:
+        sido = request.args.get('sido')
+        sigungu = request.args.get('sigungu')
+        sport = request.args.get('sport')
+
+        if not sport:
+             return jsonify({"success": False, "error": "종목을 선택해주세요."}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        sql = """
+            SELECT id, name, club_image_url, point,
+                   RANK() OVER (ORDER BY point DESC) as ranking
+            FROM Clubs
+            WHERE sport = %s
+        """
+        params = [sport]
+
+        if sido:
+            sql += " AND sido = %s"
+            params.append(sido)
+        if sigungu:
+            sql += " AND sigungu = %s"
+            params.append(sigungu)
+
+        sql += " ORDER BY point DESC LIMIT 50"
+
+        cursor.execute(sql, tuple(params))
+        ranking_list = cursor.fetchall()
+
+        return jsonify({"success": True, "ranking": ranking_list}), 200
+
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()
+
+
+# ==========================================
+# 3. 일정 및 게시글 (Schedule & Posts)
+# ==========================================
 
 @clubs_bp.route("/api/schedules", methods=["GET"])
 def get_schedules():
-    db_connection = None
+    conn = None
     try:
         club_id = request.args.get('club_id')
-        year = request.args.get('year')   # 선택된 연도
-        month = request.args.get('month') # 선택된 월
+        year = request.args.get('year')
+        month = request.args.get('month')
         
-        if not club_id or not year or not month:
+        if not all([club_id, year, month]):
              return jsonify({"success": False, "error": "필수 파라미터 누락"}), 400
 
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor(dictionary=True)
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
-        # 해당 연/월의 일정 조회
         sql = """
             SELECT 
                 id, title, description, location, is_match, opponent_name,
                 max_participants, current_participants,
                 DATE_FORMAT(schedule_date, '%Y-%m-%d') as date_str,
                 DATE_FORMAT(schedule_date, '%H:%i') as time_str,
-                DATE_FORMAT(schedule_date, '%p') as ampm -- AM/PM
+                DATE_FORMAT(schedule_date, '%p') as ampm
             FROM Schedules
             WHERE club_id = %s 
               AND YEAR(schedule_date) = %s 
@@ -264,216 +378,257 @@ def get_schedules():
 
         return jsonify({"success": True, "schedules": schedules}), 200
 
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (get_schedules): {e}")
-        return jsonify({"success": False, "error": "DB 오류"}), 500
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
-        if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
+        if conn and conn.is_connected(): conn.close()
+
 
 @clubs_bp.route("/api/schedules", methods=["POST"])
 def create_schedule():
-    db_connection = None
-    cursor = None
+    conn = None
     try:
         if 'user_id' not in session:
             return jsonify({"success": False, "error": "로그인이 필요합니다."}), 401
 
         data = request.get_json()
-        club_id = data.get('club_id')
-        title = data.get('title')
-        description = data.get('description')
-        location = data.get('location')
-        schedule_date = data.get('schedule_date') # 'YYYY-MM-DD HH:MM:SS' 형식
-        max_participants = data.get('max_participants')
-        is_match = data.get('is_match', False) # 기본값 False
-        opponent_name = data.get('opponent_name') # 경기일 경우만
-
-        if not club_id or not title or not location or not schedule_date or not max_participants:
+        # 필수 데이터 검증
+        if not all(key in data for key in ['club_id', 'title', 'location', 'schedule_date', 'max_participants']):
              return jsonify({"success": False, "error": "필수 정보가 누락되었습니다."}), 400
 
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor()
+        conn = get_db_connection()
+        cursor = conn.cursor()
         
-        # 작성자 ID 찾기
+        # 작성자 DB ID 조회
         cursor.execute("SELECT id FROM Users WHERE user_id = %s", (session['user_id'],))
         user_record = cursor.fetchone()
         if not user_record:
-            return jsonify({"success": False, "error": "사용자 정보를 찾을 수 없습니다."}), 404
+            return jsonify({"success": False, "error": "사용자 불일치"}), 404
+        
         author_id = user_record[0]
 
-        # 일정 저장
         sql = """
             INSERT INTO Schedules 
             (club_id, user_id, title, description, location, schedule_date, max_participants, is_match, opponent_name)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
-        val = (club_id, author_id, title, description, location, schedule_date, max_participants, is_match, opponent_name)
+        val = (
+            data['club_id'], author_id, data['title'], data.get('description'), 
+            data['location'], data['schedule_date'], data['max_participants'], 
+            data.get('is_match', False), data.get('opponent_name')
+        )
         
         cursor.execute(sql, val)
-        db_connection.commit()
+        conn.commit()
         
         return jsonify({"success": True, "message": "일정이 등록되었습니다."}), 201
 
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (create_schedule): {e}")
-        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
     finally:
-        if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
+        if conn and conn.is_connected(): conn.close()
 
-@clubs_bp.route("/api/ranking", methods=["GET"])
-def get_club_ranking():
-    db_connection = None
-    try:
-        sido = request.args.get('sido')
-        sigungu = request.args.get('sigungu')
-        sport = request.args.get('sport')
-
-        # 필터 조건이 없으면 에러 또는 기본값 처리
-        if not sport:
-             return jsonify({"success": False, "error": "종목을 선택해주세요."}), 400
-
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor(dictionary=True)
-
-        # 랭킹 조회 쿼리
-        # 포인트(point) 내림차순으로 정렬
-        sql = """
-            SELECT 
-                id, name, club_image_url, point,
-                RANK() OVER (ORDER BY point DESC) as ranking
-            FROM Clubs
-            WHERE sport = %s
-        """
-        params = [sport]
-
-        if sido:
-            sql += " AND sido = %s"
-            params.append(sido)
-        
-        if sigungu:
-            sql += " AND sigungu = %s"
-            params.append(sigungu)
-
-        sql += " ORDER BY point DESC LIMIT 50" # 상위 50개만
-
-        cursor.execute(sql, tuple(params))
-        ranking_list = cursor.fetchall()
-
-        return jsonify({"success": True, "ranking": ranking_list}), 200
-
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (ranking): {e}")
-        return jsonify({"success": False, "error": "데이터베이스 오류"}), 500
-    finally:
-        if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
-
-@clubs_bp.route("/api/clubs/list", methods=["GET"])
-def get_clubs_list():
-    db_connection = None
-    cursor = None
-    try:
-        # 1. 파라미터 받기
-        sido = request.args.get('sido')       # 예: '인천광역시'
-        sport = request.args.get('sport')     # 예: '볼링'
-        keyword = request.args.get('keyword') # 검색어 (선택)
-
-        db_connection = get_db_connection()
-        cursor = db_connection.cursor(dictionary=True)
-
-        # 2. SQL 쿼리 작성
-        # 기본적으로 sido와 sport는 필수 조건으로 검색합니다.
-        sql = """
-            SELECT 
-                C.id, C.name, C.description, C.sport, C.sido, C.sigungu, C.club_image_url,
-                C.max_capacity,
-                (SELECT COUNT(*) FROM ClubMembers CM WHERE CM.club_id = C.id) AS member_count
-            FROM Clubs C
-            WHERE C.sido = %s AND C.sport = %s
-        """
-        params = [sido, sport]
-
-        # 3. 검색어(keyword)가 있다면 제목(name) 검색 조건 추가
-        if keyword:
-            sql += " AND C.name LIKE %s"
-            params.append(f"%{keyword}%")
-
-        # 4. 정렬: 최근 생성순, 또는 멤버 많은 순
-        sql += " ORDER BY C.created_at DESC"
-
-        cursor.execute(sql, tuple(params))
-        clubs = cursor.fetchall()
-
-        return jsonify({"success": True, "clubs": clubs}), 200
-
-    except mysql.connector.Error as e:
-        current_app.logger.error(f"DB Error (get_clubs_list): {e}")
-        return jsonify({"success": False, "error": "DB 오류"}), 500
-    finally:
-        if cursor: cursor.close()
-        if db_connection and db_connection.is_connected():
-            db_connection.close()
 
 @clubs_bp.route("/api/club/<int:club_id>/schedules", methods=["GET"])
 def get_club_schedules(club_id):
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    
-    # 1. Schedules 테이블 조회
-    # DB의 schedule_date를 가져옵니다.
-    sql = """
-        SELECT id, title, description, location, 
-               schedule_date,  -- DB의 datetime 필드 그대로 가져옴
-               is_match, opponent_name, 
-               max_participants, current_participants
-        FROM Schedules 
-        WHERE club_id = %s AND schedule_date >= NOW()
-        ORDER BY schedule_date ASC 
-        LIMIT 5
-    """
-    cursor.execute(sql, (club_id,))
-    schedules = cursor.fetchall()
-    
-    cursor.close()
-    conn.close()
-    
-    # datetime 객체는 JSON 직렬화가 안 되므로 문자열로 변환하여 전송
-    for s in schedules:
-        s['schedule_date'] = s['schedule_date'].strftime('%Y-%m-%d %H:%M:%S')
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # 다가오는 일정 5개 조회
+        sql = """
+            SELECT id, title, description, location, schedule_date,
+                   is_match, opponent_name, max_participants, current_participants
+            FROM Schedules 
+            WHERE club_id = %s AND schedule_date >= NOW()
+            ORDER BY schedule_date ASC 
+            LIMIT 5
+        """
+        cursor.execute(sql, (club_id,))
+        schedules = cursor.fetchall()
+        
+        # JSON 직렬화를 위해 datetime 변환
+        for s in schedules:
+            s['schedule_date'] = s['schedule_date'].strftime('%Y-%m-%d %H:%M:%S')
 
-    return jsonify({"success": True, "schedules": schedules}), 200
+        return jsonify({"success": True, "schedules": schedules}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()
+
+
+@clubs_bp.route("/api/club/<int:club_id>/matches/finished", methods=["GET"])
+def get_finished_matches(club_id):
+    conn = None
+    try:
+        conn = get_db_connection()
+        # 이전 쿼리 충돌 방지를 위해 buffered=True 필수
+        cursor = conn.cursor(dictionary=True, buffered=True)
+        
+        # 최근 경기 결과 조회
+        # schedule_date가 없으면 created_at을 대신 사용 (COALESCE)
+        sql = """
+            SELECT 
+                MQ.id, MQ.score_a as my_score, MQ.score_b as op_score, 
+                DATE_FORMAT(COALESCE(MQ.schedule_date, MQ.created_at), '%%m월 %%d일') as match_date,
+                DATE_FORMAT(COALESCE(MQ.schedule_date, MQ.created_at), '%%H:%%i') as match_time,
+                C.name as opponent_name,
+                C.club_image_url as opponent_image
+            FROM MatchQueue MQ
+            JOIN Clubs C ON MQ.matched_club_id = C.id
+            WHERE MQ.club_id = %s 
+              AND MQ.status = 'FINISHED'
+            ORDER BY COALESCE(MQ.schedule_date, MQ.created_at) DESC
+            LIMIT 5
+        """
+        cursor.execute(sql, (club_id,))
+        matches = cursor.fetchall()
+        
+        return jsonify({"success": True, "matches": matches}), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error fetching match history: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()
 
 
 @clubs_bp.route("/api/club/<int:club_id>/posts", methods=["GET"])
 def get_club_posts(club_id):
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    
-    # 2. Posts 테이블 + Users 테이블 조인
-    # user_name을 author_name으로 별칭(alias) 지정
-    sql = """
-        SELECT P.id, P.title, P.content, P.likes, P.image_url,
-               P.created_at,
-               U.name as author_name, -- 작성자 이름 가져오기
-               0 as comment_count     -- (임시) 댓글 수는 0으로 처리
-        FROM Posts P
-        JOIN Users U ON P.user_id = U.id
-        WHERE P.club_id = %s
-        ORDER BY P.created_at DESC 
-        LIMIT 5
-    """
-    cursor.execute(sql, (club_id,))
-    posts = cursor.fetchall()
-    
-    cursor.close()
-    conn.close()
+    conn = None
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        sql = """
+            SELECT P.id, P.title, P.content, P.likes, P.image_url, P.created_at,
+                   U.name as author_name,
+                   0 as comment_count
+            FROM Posts P
+            JOIN Users U ON P.user_id = U.id
+            WHERE P.club_id = %s
+            ORDER BY P.created_at DESC 
+            LIMIT 5
+        """
+        cursor.execute(sql, (club_id,))
+        posts = cursor.fetchall()
+        
+        for p in posts:
+            p['created_at'] = p['created_at'].strftime('%Y-%m-%d %H:%M:%S')
 
-    for p in posts:
-        p['created_at'] = p['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+        return jsonify({"success": True, "posts": posts}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()
 
-    return jsonify({"success": True, "posts": posts}), 200
+
+# ==========================================
+# 4. 가입 신청 및 관리 (Join Request)
+# ==========================================
+
+@clubs_bp.route("/api/club/join", methods=["POST"])
+def request_join_club():
+    conn = None
+    try:
+        if 'user_id' not in session:
+            return jsonify({"success": False, "error": "로그인 필요"}), 401
+
+        data = request.get_json()
+        club_id = data.get('club_id')
+        user_str_id = session['user_id']
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. 유저 PK 조회
+        cursor.execute("SELECT id FROM Users WHERE user_id = %s", (user_str_id,))
+        user_row = cursor.fetchone()
+        user_db_id = user_row['id']
+
+        # 2. 중복 가입/신청 확인
+        cursor.execute("SELECT * FROM ClubMembers WHERE club_id=%s AND user_id=%s", (club_id, user_db_id))
+        if cursor.fetchone():
+            return jsonify({"success": False, "error": "이미 가입된 동호회입니다."}), 400
+
+        try:
+            cursor.execute("SELECT * FROM ClubJoinRequests WHERE club_id=%s AND user_id=%s", (club_id, user_db_id))
+            if cursor.fetchone():
+                return jsonify({"success": False, "error": "이미 가입 신청을 했습니다."}), 400
+        except Exception:
+            pass # 테이블이 없으면 패스 (혹은 에러 처리)
+
+        # 3. 신청 등록
+        cursor.execute("INSERT INTO ClubJoinRequests (club_id, user_id) VALUES (%s, %s)", (club_id, user_db_id))
+        conn.commit()
+
+        return jsonify({"success": True, "message": "가입 신청이 완료되었습니다."}), 200
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()
+
+
+@clubs_bp.route("/api/club/requests", methods=["GET"])
+def get_join_requests():
+    conn = None
+    try:
+        club_id = request.args.get('club_id')
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        sql = """
+            SELECT R.id as request_id, U.id as user_id, U.name, U.profile_image_url, 
+                   DATE_FORMAT(R.created_at, '%%Y-%%m-%%d') as created_at
+            FROM ClubJoinRequests R
+            JOIN Users U ON R.user_id = U.id
+            WHERE R.club_id = %s
+            ORDER BY R.created_at DESC
+        """
+        cursor.execute(sql, (club_id,))
+        requests = cursor.fetchall()
+        
+        return jsonify({"success": True, "requests": requests}), 200
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()
+
+
+@clubs_bp.route("/api/club/request/process", methods=["POST"])
+def process_join_request():
+    conn = None
+    try:
+        data = request.get_json()
+        request_id = data.get('request_id')
+        action = data.get('action') # 'APPROVE' or 'REJECT'
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 요청 정보 조회
+        cursor.execute("SELECT club_id, user_id FROM ClubJoinRequests WHERE id=%s", (request_id,))
+        req = cursor.fetchone()
+        if not req:
+            return jsonify({"success": False, "error": "요청을 찾을 수 없습니다."}), 404
+
+        if action == 'APPROVE':
+            # 멤버 추가
+            cursor.execute("INSERT INTO ClubMembers (club_id, user_id, role) VALUES (%s, %s, 'MEMBER')", 
+                           (req['club_id'], req['user_id']))
+            cursor.execute("UPDATE Clubs SET member_count = member_count + 1 WHERE id=%s", (req['club_id'],))
+            
+        # 승인/거절 후 요청 내역 삭제
+        cursor.execute("DELETE FROM ClubJoinRequests WHERE id=%s", (request_id,))
+        
+        conn.commit()
+        return jsonify({"success": True, "message": "처리되었습니다."}), 200
+    except Exception as e:
+        if conn: conn.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
+    finally:
+        if conn and conn.is_connected(): conn.close()

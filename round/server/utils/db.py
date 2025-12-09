@@ -12,5 +12,4 @@ def get_db_connection():
         'database': os.environ.get('DB_NAME')
     }
     
-    # 연결 객체 반환
     return mysql.connector.connect(**db_config)

@@ -13,18 +13,18 @@ class ApiClient {
 
   ApiClient._internal();
 
-  // --- 5. (신규) 앱이 시작되기 전에 호출될 비동기 초기화 함수 ---
+  //앱이 시작되기 전에 호출될 비동기 초기화 함수 ---
   static Future<void> init() async {
     Directory appDocDir = await getApplicationDocumentsDirectory();
     String appDocPath = appDocDir.path;
     
-    // 7. (중요!) 메모리(CookieJar) 대신 파일(PersistCookieJar)에 저장하도록 변경
+    //메모리(CookieJar) 대신 파일(PersistCookieJar)에 저장하도록 변경
     _instance.cookieJar = PersistCookieJar(
       ignoreExpires: true, // 만료 시간을 서버 세션(30일)에 맡김
       storage: FileStorage(appDocPath + "/.cookies/"),
     );
 
-    // 8. Dio 인스턴스 생성
+    //Dio 인스턴스 생성
     _instance.dio = Dio(BaseOptions(
       baseUrl: 'https://roundserver.win', 
       connectTimeout: const Duration(seconds: 5),

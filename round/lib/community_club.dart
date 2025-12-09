@@ -1,41 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
-import 'package:round/models/club_models.dart'; // MyClub 등 모델 사용
-import 'package:round/club_main.dart'; // 상세 화면 이동용
+import 'package:round/models/club_models.dart'; // MyClub 모델
+import 'package:round/club_main.dart'; // 상세 화면
 
-// 목록용 모델 (RecommendedClub 모델 재사용 또는 새로 정의)
-class CommunityClub {
-  final int id;
-  final String name;
-  final String description;
-  final String tags;
-  final String? imageUrl;
-  final int memberCount;
-  final int maxCapacity;
-
-  CommunityClub({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.tags,
-    this.imageUrl,
-    required this.memberCount,
-    required this.maxCapacity,
-  });
-
-  factory CommunityClub.fromJson(Map<String, dynamic> json) {
-    return CommunityClub(
-      id: json['id'],
-      name: json['name'],
-      description: json['description'],
-      tags: "${json['sido']} ${json['sigungu']}",
-      imageUrl: json['club_image_url'],
-      memberCount: json['member_count'],
-      maxCapacity: json['max_capacity'],
-    );
-  }
-}
 
 class CommunityClubTab extends StatefulWidget {
   final String userId;
@@ -46,6 +14,7 @@ class CommunityClubTab extends StatefulWidget {
 }
 
 class _CommunityClubTabState extends State<CommunityClubTab> {
+  // Palette
   static const Color _chipSel = Color(0xFF60A5FA);
   static const Color _chipUnsel = Color(0xFF2F2F2F);
   static const Color _panel = Color(0xFF2F2F2F);
@@ -54,9 +23,9 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
   final Dio dio = ApiClient().dio;
   final TextEditingController _searchController = TextEditingController();
 
-  // 상태 변수
+  // State
   bool _isLoading = true;
-  String _userSido = ''; // 사용자의 시/도
+  String _userSido = ''; 
   String _selectedCategory = '볼링';
   String _searchKeyword = '';
   List<CommunityClub> _clubList = [];
@@ -71,23 +40,26 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
     _initializeData();
   }
 
-  // 1. 초기화: 사용자 지역 가져오기 -> 목록 가져오기
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  // 1. 초기 데이터 로드 (위치 -> 목록)
   Future<void> _initializeData() async {
     try {
-      // 사용자 위치 정보 가져오기
       final response = await dio.get('/api/user-locations');
       final locations = response.data['locations'];
       
       if (mounted) {
         setState(() {
-          // 주 활동지역의 '시/도'만 저장 (없으면 기본값)
           _userSido = locations['primary_sido'] ?? '서울특별시';
         });
-        _fetchClubs(); // 목록 로딩 시작
+        _fetchClubs();
       }
     } catch (e) {
-      print("위치 정보 로드 실패: $e");
-      // 실패 시 기본값으로라도 로딩 시도
+      debugPrint("위치 정보 로드 실패: $e");
       if (mounted) {
         setState(() => _userSido = '서울특별시');
         _fetchClubs();
@@ -102,36 +74,31 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
     setState(() => _isLoading = true);
     try {
       final response = await dio.get('/api/clubs/list', queryParameters: {
-        'sido': _userSido,            // 👈 핵심: 시/도 만 보냄
+        'sido': _userSido,
         'sport': _selectedCategory,
         'keyword': _searchKeyword,
       });
 
       final List<dynamic> data = response.data['clubs'];
-      setState(() {
-        _clubList = data.map((e) => CommunityClub.fromJson(e)).toList();
-        _isLoading = false;
-      });
+      
+      if (mounted) {
+        setState(() {
+          _clubList = data.map((e) => CommunityClub.fromJson(e)).toList();
+          _isLoading = false;
+        });
+      }
     } on DioException catch (e) {
-      print("동호회 목록 로드 실패: $e");
-      setState(() => _isLoading = false);
+      debugPrint("동호회 목록 로드 실패: ${e.message}");
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
+  // --- UI Build ---
 
   @override
   Widget build(BuildContext context) {
-    // 탭 내부에서도 FAB를 쓰기 위해 Scaffold로 감쌉니다.
-    // (배경색은 부모 화면과 맞추기 위해 transparent 또는 _bg 색상 사용)
     return Scaffold(
-      backgroundColor: Colors.transparent, // 부모 배경색 유지
-      
-      // 기존 UI 내용
+      backgroundColor: Colors.transparent, // 부모 배경 유지
       body: Column(
         children: [
           _buildSearchBar(),
@@ -146,7 +113,6 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
         foregroundColor: const Color(0xFF1F2937),
         elevation: 4,
         onPressed: () {
-          // 동호회 생성 화면으로 이동
           Navigator.pushNamed(
             context,
             '/createClub',
@@ -155,16 +121,15 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
         },
         child: const Icon(Icons.add, size: 28),
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
-  // 검색창
+  // 1. 검색창 위젯
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Container(
-        height: 40,
+        height: 44,
         decoration: BoxDecoration(
           color: const Color(0xFF313131),
           borderRadius: BorderRadius.circular(12),
@@ -186,14 +151,12 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
                   hintStyle: TextStyle(color: Colors.white54),
                   border: InputBorder.none,
                 ),
-                // 검색어 입력 완료 시(엔터) 검색 실행
                 onSubmitted: (value) {
                   setState(() => _searchKeyword = value);
                   _fetchClubs();
                 },
               ),
             ),
-            // 검색어 초기화 버튼
             if (_searchKeyword.isNotEmpty)
               GestureDetector(
                 onTap: () {
@@ -209,53 +172,51 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
     );
   }
 
-  // 카테고리 그리드
+  // 2. 카테고리 선택 그리드
   Widget _buildCategoryGrid() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: SizedBox( // GridView가 Expanded 되기 전에 높이를 제한하거나 shrinkWrap 사용
-        child: GridView.count(
-          shrinkWrap: true,
-          crossAxisCount: 3,
-          mainAxisSpacing: 10,
-          crossAxisSpacing: 10,
-          physics: const NeverScrollableScrollPhysics(),
-          childAspectRatio: 2.8,
-          children: _categories.map((label) {
-            final selected = _selectedCategory == label;
-            return GestureDetector(
-              onTap: () {
-                if (_selectedCategory != label) {
-                  setState(() => _selectedCategory = label);
-                  _fetchClubs(); // 카테고리 변경 시 목록 새로고침
-                }
-              },
-              child: Container(
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: selected ? _chipSel : _chipUnsel,
-                  borderRadius: BorderRadius.circular(30),
-                  border: Border.all(
-                    color: selected ? const Color(0xFF60A5FA) : const Color(0xFF444444),
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    color: selected ? Colors.white : Colors.white70,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      child: GridView.count(
+        shrinkWrap: true,
+        crossAxisCount: 3,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 2.8,
+        physics: const NeverScrollableScrollPhysics(),
+        children: _categories.map((label) {
+          final selected = _selectedCategory == label;
+          return GestureDetector(
+            onTap: () {
+              if (_selectedCategory != label) {
+                setState(() => _selectedCategory = label);
+                _fetchClubs();
+              }
+            },
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? _chipSel : _chipUnsel,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(
+                  color: selected ? const Color(0xFF60A5FA) : const Color(0xFF444444),
                 ),
               ),
-            );
-          }).toList(),
-        ),
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.white : Colors.white70,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }
 
-  // 동호회 목록 영역
+  // 3. 리스트 영역
   Widget _buildClubListArea() {
     if (_isLoading) {
       return const Expanded(child: Center(child: CircularProgressIndicator(color: _lime)));
@@ -270,26 +231,43 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
     }
 
     return Expanded(
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: _clubList.length,
-        separatorBuilder: (ctx, i) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final club = _clubList[index];
-          return _buildClubItem(club);
-        },
+      child: RefreshIndicator(
+        color: _lime,
+        backgroundColor: _panel,
+        onRefresh: _fetchClubs,
+        child: ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          itemCount: _clubList.length,
+          separatorBuilder: (ctx, i) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            return _buildClubItem(_clubList[index]);
+          },
+        ),
       ),
     );
   }
 
-  // 리스트 아이템 UI
+  // 4. 개별 아이템 카드
   Widget _buildClubItem(CommunityClub club) {
-    // 임시 MyClub 변환 (ClubMainScreen 이동용)
-    final myClub = MyClub(id: club.id, name: club.name);
+    // Tags("인천광역시 미추홀구") -> Sido, Sigungu 분리
+    List<String> locations = club.tags.split(' ');
+    String sido = locations.isNotEmpty ? locations[0] : '';
+    String sigungu = locations.length > 1 ? locations[1] : '';
+
+    // 상세 화면 이동을 위한 모델 변환
+    final myClub = MyClub(
+      id: club.id, 
+      name: club.name,
+      description: club.description,
+      clubImage: club.imageUrl ?? '',
+      memberCount: club.memberCount,
+      sport: _selectedCategory, // 현재 선택된 카테고리 주입
+      sido: sido,
+      sigungu: sigungu,
+    );
 
     return GestureDetector(
       onTap: () {
-        // 클릭 시 상세 화면(ClubMainScreen)으로 이동
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -305,7 +283,8 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
         ),
         child: Row(
           children: [
-            // 이미지
+            // 
+            // 클럽 이미지
             Container(
               width: 70, height: 70,
               decoration: BoxDecoration(
@@ -326,13 +305,19 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(club.name,
-                      style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                  Text(
+                    club.name,
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   const SizedBox(height: 4),
-                  Text(club.description,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  Text(
+                    club.description,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -340,8 +325,10 @@ class _CommunityClubTabState extends State<CommunityClubTab> {
                       const Spacer(),
                       const Icon(Icons.person, size: 14, color: Colors.white38),
                       const SizedBox(width: 4),
-                      Text("${club.memberCount}/${club.maxCapacity}", 
-                          style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                      Text(
+                        "${club.memberCount}/${club.maxCapacity}", 
+                        style: const TextStyle(color: Colors.white38, fontSize: 12)
+                      ),
                     ],
                   ),
                 ],

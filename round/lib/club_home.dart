@@ -2,37 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:round/api_client.dart';
 import 'package:round/models/club_models.dart';
-import 'package:round/friendly_match_detail_screen.dart'; // 채팅방 화면 import
-
-// 진행 중인 매칭 데이터 모델 (이 화면에서만 쓰인다면 여기에 정의)
-class ActiveMatch {
-  final String matchId;
-  final String opponentName;
-  final String? opponentImage;
-  final String status;
-  final String sport;
-  final String location;
-
-  ActiveMatch({
-    required this.matchId,
-    required this.opponentName,
-    this.opponentImage,
-    required this.status,
-    required this.sport,
-    required this.location,
-  });
-
-  factory ActiveMatch.fromJson(Map<String, dynamic> json) {
-    return ActiveMatch(
-      matchId: json['match_id'],
-      opponentName: json['opponent_name'],
-      opponentImage: json['opponent_image'],
-      status: json['status'],
-      sport: json['sport'],
-      location: "${json['sido']} ${json['sigungu']}",
-    );
-  }
-}
+import 'package:round/friendly_match_detail_screen.dart';
+import 'package:round/club_requests.dart'; // 가입 관리 화면
 
 class ClubHomeScreen extends StatefulWidget {
   final int clubId;
@@ -53,12 +24,12 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
   static const Color _bg = Color(0xFF262626);
   static const Color _lime = Color(0xFFB7F34D);
   static const Color _panel = Color(0xFF2F2F2F);
-  static const Color _chipBlue = Color(0xFF60A5FA);
-  static const Color _matchChip = Color(0xFFFF5A3C);
 
   bool _isLoading = true;
-  ClubInfo? _clubInfo;
+  String _myRole = "NONE";
   List<ActiveMatch> _activeMatches = [];
+  List<RecentMatch> _recentMatches = [];
+  ClubInfo? _clubInfo;
 
   final Dio dio = ApiClient().dio;
 
@@ -68,37 +39,59 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
     _fetchAllData();
   }
 
+  // 데이터 통합 로딩 (클럽 정보, 진행 중인 매칭, 최근 전적)
   Future<void> _fetchAllData() async {
     setState(() => _isLoading = true);
     try {
-      // 1. 클럽 상세 정보 & 2. 진행 중인 매칭 목록 동시 호출
       final results = await Future.wait([
         dio.get('/api/club-info', queryParameters: {'club_id': widget.clubId}),
-        dio.get('/api/my-matches'), // 내가 속한 모든 매칭을 가져옴
+        dio.get('/api/my-matches'),
+        dio.get('/api/club/${widget.clubId}/matches/finished'),
       ]);
 
       final clubData = results[0].data['club'];
-      final matchData = results[1].data['matches'] as List;
+      final activeMatchData = results[1].data['matches'] as List;
+      final recentMatchData = results[2].data['matches'] as List;
 
-      setState(() {
-        _clubInfo = ClubInfo.fromJson(clubData);
-        
-        // 전체 매칭 중 '이 클럽'과 관련된 매칭만 필터링하거나, 
-        // 서버에서 필터링해서 주지 않았다면 클라이언트에서 표시 (여기선 전체 표시)
-        _activeMatches = matchData.map((m) => ActiveMatch.fromJson(m)).toList();
-        
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _clubInfo = ClubInfo.fromJson(clubData);
+          _myRole = clubData['my_role'] ?? "NONE";
+          
+          // 진행 중인 매칭 필터링: 매칭 ID에 클럽 ID가 포함된 경우
+          // (주의: UUID 방식이면 서버에서 필터링해서 내려주는 게 더 안전하지만, 여기선 클라이언트 필터링 유지)
+          _activeMatches = activeMatchData
+              .map((m) => ActiveMatch.fromJson(m))
+              // .where((m) => m.matchId.contains(widget.clubId.toString())) // 필요 시 활성화
+              .toList();
+
+          _recentMatches = recentMatchData.map((m) => RecentMatch.fromJson(m)).toList();
+          _isLoading = false;
+        });
+      }
     } on DioException catch (e) {
-      print("클럽 홈 데이터 로딩 실패: $e");
+      debugPrint("클럽 홈 데이터 로딩 실패: ${e.message}");
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 숫자 포맷팅
+  // 가입 신청 요청
+  Future<void> _requestJoin() async {
+    try {
+      await dio.post('/api/club/join', data: {'club_id': widget.clubId});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("가입 신청을 보냈습니다.")));
+        _fetchAllData(); // 상태 갱신
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("오류가 발생했습니다.")));
+      }
+    }
+  }
+
   String _formatNumber(int n) {
-    return n.toString().replaceAllMapped(
-        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
+    return n.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},');
   }
 
   @override
@@ -123,15 +116,15 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
             _buildBanner(info),
             _buildStatsRow(info),
             
-            // --- 👇👇👇 진행 중인 매칭 (채팅방 재입장) 👇👇👇 ---
+            // 1. 진행 중인 경기 (있을 때만 표시)
             if (_activeMatches.isNotEmpty) ...[
               _buildSectionTitle("진행 중인 경기"),
               _buildActiveMatchesList(),
             ],
             
-            // 최근 경기 결과 (더미 데이터 or 추후 구현)
+            // 2. 최근 경기 결과
             _buildSectionTitle("최근 경기 결과"),
-            _buildRecentMatchCard(), 
+            _buildRecentMatchCard(),
             
             const SizedBox(height: 100),
           ],
@@ -140,14 +133,51 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
     );
   }
 
-  // ===== 위젯 빌더 =====
+  // --- Widgets ---
 
   Widget _buildHeader(ClubInfo info) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Text(
-        info.name,
-        style: const TextStyle(color: _lime, fontSize: 24, fontWeight: FontWeight.w700),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              info.name,
+              style: const TextStyle(color: _lime, fontSize: 24, fontWeight: FontWeight.w700),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // 내 권한(Role)에 따른 버튼 표시
+          if (_myRole == "NONE")
+            ElevatedButton(
+              onPressed: _requestJoin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _lime, 
+                foregroundColor: Colors.black, 
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)
+              ),
+              child: const Text("가입 신청", style: TextStyle(fontWeight: FontWeight.bold)),
+            )
+          else if (_myRole == "PENDING")
+            OutlinedButton(
+              onPressed: null,
+              style: OutlinedButton.styleFrom(side: const BorderSide(color: Colors.grey)),
+              child: const Text("신청 대기중", style: TextStyle(color: Colors.grey)),
+            )
+          else if (_myRole == "ADMIN" || _myRole == "admin")
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context, 
+                  MaterialPageRoute(builder: (_) => ClubRequestsScreen(clubId: widget.clubId))
+                );
+              },
+              icon: const Icon(Icons.settings, size: 18),
+              label: const Text("관리"),
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.grey[800], foregroundColor: Colors.white),
+            ),
+        ],
       ),
     );
   }
@@ -166,9 +196,9 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
               : null,
         ),
         child: (info.bannerUrl.isEmpty || info.bannerUrl.contains('placeholder'))
-            ? Column(
+            ? const Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
+                children: [
                   Icon(Icons.image_not_supported_outlined, color: Colors.white24, size: 40),
                   SizedBox(height: 8),
                   Text('대표 이미지가 없습니다', style: TextStyle(color: Colors.white38, fontSize: 13)),
@@ -223,7 +253,6 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
     );
   }
 
-  // 진행 중인 매칭 리스트 (채팅방 이동 가능)
   Widget _buildActiveMatchesList() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -234,7 +263,6 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
         final match = _activeMatches[index];
         return GestureDetector(
           onTap: () {
-            // 채팅방(매칭 상세)으로 이동
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -249,18 +277,19 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF383838), // 조금 더 밝은 배경
+              color: const Color(0xFF383838),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _lime.withOpacity(0.3)), // 강조 테두리
+              border: Border.all(color: _lime.withOpacity(0.3)),
             ),
             child: Row(
               children: [
-                // 상대방 이미지
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: Colors.grey[700],
                   backgroundImage: (match.opponentImage != null) ? NetworkImage(match.opponentImage!) : null,
-                  child: (match.opponentImage == null) ? Text(match.opponentName[0], style: const TextStyle(color: Colors.white)) : null,
+                  child: (match.opponentImage == null) 
+                      ? Text(match.opponentName.isNotEmpty ? match.opponentName[0] : '?', style: const TextStyle(color: Colors.white)) 
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -289,46 +318,97 @@ class _ClubHomeScreenState extends State<ClubHomeScreen> {
     );
   }
 
-  // 최근 경기 결과 (임시 더미)
   Widget _buildRecentMatchCard() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _panel,
-          borderRadius: BorderRadius.circular(14),
+    if (_recentMatches.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: _panel,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: const Center(
+            child: Text("최근 경기 기록이 없습니다.", style: TextStyle(color: Colors.white38)),
+          ),
         ),
-        child: Row(
-          children: [
-            // 날짜
-            Column(
-              children: const [
-                Text("9월 2일", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                Text("12:30", style: TextStyle(color: Colors.white54, fontSize: 12)),
-              ],
-            ),
-            const SizedBox(width: 16),
-            // 스코어
-            Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _recentMatches.length,
+      separatorBuilder: (c, i) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        final match = _recentMatches[index];
+        
+        String resultText;
+        Color resultColor;
+        Color resultBg;
+
+        if (match.myScore > match.opScore) {
+          resultText = "승리";
+          resultColor = const Color(0xFF38BDF8);
+          resultBg = const Color(0xFF38BDF8).withOpacity(0.2);
+        } else if (match.myScore < match.opScore) {
+          resultText = "패배";
+          resultColor = const Color(0xFFFF5A3C);
+          resultBg = const Color(0xFFFF5A3C).withOpacity(0.2);
+        } else {
+          resultText = "무승부";
+          resultColor = Colors.grey;
+          resultBg = Colors.grey.withOpacity(0.2);
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _panel,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              Column(
                 children: [
-                  Text(_clubInfo!.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  const Text("2 : 0", style: TextStyle(color: _lime, fontSize: 20, fontWeight: FontWeight.bold)),
-                  const Text("상대팀", style: TextStyle(color: Colors.white54)),
+                  Text(match.matchDate, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  Text(match.matchTime, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                 ],
               ),
-            ),
-            // 결과 뱃지
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: const Color(0xFF38BDF8).withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
-              child: const Text("승리", style: TextStyle(color: Color(0xFF38BDF8), fontSize: 12, fontWeight: FontWeight.bold)),
-            )
-          ],
-        ),
-      ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Expanded(
+                      child: Text(_clubInfo!.name, 
+                          textAlign: TextAlign.right,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13))),
+                    
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Text("${match.myScore} : ${match.opScore}", 
+                          style: TextStyle(color: _lime, fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                    
+                    Expanded(
+                      child: Text(match.opponentName, 
+                          textAlign: TextAlign.left,
+                          style: const TextStyle(color: Colors.white54, fontSize: 13))),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: resultBg, borderRadius: BorderRadius.circular(4)),
+                child: Text(resultText, style: TextStyle(color: resultColor, fontSize: 12, fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+        );
+      },
     );
   }
 }

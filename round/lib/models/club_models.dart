@@ -1,13 +1,69 @@
 class MyClub {
   final int id;
   final String name;
+  final String description;
+  final String clubImage;
+  final int memberCount;
+  
 
-  MyClub({required this.id, required this.name});
+  final String sport;
+  final String sido;
+  final String sigungu;
+
+  MyClub({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.clubImage,
+    required this.memberCount,
+    required this.sport,
+    required this.sido,
+    required this.sigungu,
+  });
 
   factory MyClub.fromJson(Map<String, dynamic> json) {
     return MyClub(
       id: json['id'],
       name: json['name'],
+      description: json['description'] ?? '',
+      clubImage: json['club_image_url'] ?? '',
+      memberCount: json['member_count'] ?? 0,
+      sport: json['sport'] ?? '기타',
+      sido: json['sido'] ?? '',
+      sigungu: json['sigungu'] ?? '',
+    );
+  }
+}
+
+// 목록 조회용 모델 (필요 시 models 폴더로 이동 권장)
+class CommunityClub {
+  final int id;
+  final String name;
+  final String description;
+  final String tags;
+  final String? imageUrl;
+  final int memberCount;
+  final int maxCapacity;
+
+  CommunityClub({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.tags,
+    this.imageUrl,
+    required this.memberCount,
+    required this.maxCapacity,
+  });
+
+  factory CommunityClub.fromJson(Map<String, dynamic> json) {
+    return CommunityClub(
+      id: json['id'],
+      name: json['name'],
+      description: json['description'] ?? '',
+      tags: "${json['sido']} ${json['sigungu']}",
+      imageUrl: json['club_image_url'],
+      memberCount: json['member_count'] ?? 0,
+      maxCapacity: json['max_capacity'] ?? 0,
     );
   }
 }
@@ -118,7 +174,6 @@ class Schedule {
   final int maxParticipants;
   final int currentParticipants;
   
-  // 👇👇👇 [수정] 쪼개진 변수들을 지우고 이거 하나로 통합합니다.
   final String startTime; // 예: "2025-12-05 14:30:00"
 
   Schedule({
@@ -144,7 +199,6 @@ class Schedule {
       maxParticipants: json['max_participants'],
       currentParticipants: json['current_participants'] ?? 0,
       
-      // 👇👇👇 [수정] DB의 'schedule_date'를 그대로 문자열로 받습니다.
       startTime: json['schedule_date'].toString(),
     );
   }
@@ -154,13 +208,11 @@ class Post {
   final int id;
   final String title;
   final String content;
-  final String time;        // UI에서는 createdAt으로 쓰려던 것
-  final int likes;          // UI에서는 likeCount로 쓰려던 것
+  final String time;        
+  final int likes;         
   final int comments;
-  final String? imageUrl;   // 게시글 이미지
-  final String authorName;  // UI에서는 userName으로 쓰려던 것
-  
-  // 👇👇👇 [추가] 프로필 이미지 필드 추가
+  final String? imageUrl;   
+  final String authorName; 
   final String? profileImage; 
 
   Post({
@@ -189,8 +241,6 @@ class Post {
       comments: json['comment_count'] ?? 0,
       imageUrl: json['image_url'],
       authorName: json['author_name'] ?? '익명', 
-      
-      // 👇👇👇 [추가] JSON 매핑
       profileImage: json['profile_image'], 
     );
   }
@@ -220,6 +270,67 @@ class Comment {
       // 2. user_name -> authorName
       authorName: json['user_name'] ?? '익명', 
       authorImage: json['user_image'],
+    );
+  }
+}
+
+class RecentMatch {
+  final int myScore;
+  final int opScore;
+  final String matchDate;
+  final String matchTime;
+  final String opponentName;
+  final String? opponentImage;
+
+  RecentMatch({
+    required this.myScore,
+    required this.opScore,
+    required this.matchDate,
+    required this.matchTime,
+    required this.opponentName,
+    this.opponentImage,
+  });
+
+  factory RecentMatch.fromJson(Map<String, dynamic> json) {
+    return RecentMatch(
+      myScore: json['my_score'] ?? 0,
+      opScore: json['op_score'] ?? 0,
+      
+      matchDate: json['match_date'] ?? '날짜 미정',
+      matchTime: json['match_time'] ?? '',
+      
+      opponentName: json['opponent_name'] ?? '알 수 없는 팀',
+      
+      opponentImage: json['opponent_image'],
+    );
+  }
+}
+
+class ActiveMatch {
+  final String matchId;
+  final String opponentName;
+  final String? opponentImage;
+  final String status;
+  final String sport;
+  final String location;
+
+  ActiveMatch({
+    required this.matchId,
+    required this.opponentName,
+    this.opponentImage,
+    required this.status,
+    required this.sport,
+    required this.location,
+  });
+
+  factory ActiveMatch.fromJson(Map<String, dynamic> json) {
+    return ActiveMatch(
+      matchId: json['match_id'],
+      opponentName: json['opponent_name'],
+      opponentImage: json['opponent_image'],
+      status: json['status'],
+      sport: json['sport'],
+      location: "${json['sido']} ${json['sigungu']}",
     );
   }
 }
